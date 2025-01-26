@@ -110,6 +110,16 @@ class MLSStruct::Base
     buf
   end
 
+  def self.vecs(buf)
+    value, buf = String.parse_vec(buf)
+    array = []
+    while (value.bytesize > 0)
+      current_instance, value = elem[2].send(:new_and_rest, value)
+      array << current_instance
+    end
+    [array, buf]
+  end
+
   private
   def deserialize(buf)
     context = []
@@ -135,12 +145,7 @@ class MLSStruct::Base
         value, buf = String.parse_vec(buf)
         context << [elem[0], value]
       when :vecs
-        value, buf = String.parse_vec(buf)
-        array = []
-        while (value.bytesize > 0)
-          current_vec, value = String.parse_vec(value)
-          array << current_vec
-        end
+        array, buf = self.vecs(buf)
         context << [elem[0], array]
       when :class
         value, buf = elem[2].send(:new_and_rest, buf)
@@ -251,17 +256,17 @@ class MLSStruct::Sender < MLSStruct::Base
   ]
 
   private
-  def deserialize_sender_content(buf)
+  def deserialize_sender_content(buf, context)
     returns = []
     case context[:sender_type]
     when 0x01
       # member
       value = buf.byteslice(0, 4).unpack1('L>')
-      returns << [leaf_index, value]
+      returns << [:leaf_index, value]
     when 0x02
       # external
       value = buf.byteslice(0, 4).unpack1('L>')
-      returns << [sender_index, value]
+      returns << [:sender_index, value]
     when 0x03, 0x04
       # new_member_proposal, new_member_commit
     else
@@ -289,7 +294,63 @@ class MLSStruct::Sender < MLSStruct::Base
 end
 
 class MLSStruct::FramedContent < MLSStruct::Base
+  attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
+  STRUCT = [
+    [:group_id, :vecs],
+    [:epoch, :uint64],
+    [:sender, :class, MLSStruct::Sender],
+    [:authenticated_data, :vecs],
+    [:content_type, :uint8],
+    [:select_content_type, :custom]
+  ]
 
+  private
+  def deserialize_select_content_type(buf, context)
+    returns = []
+    case context[:content_type]
+    when 0x01
+      vecs, _ = self.class.vecs(buf)
+      returns << [:application_data, vecs]
+    when 0x02
+      returns << [:proposal, MLSStruct::Proposal.new(buf)]
+    when 0x03
+      returns << [:commit, MLSStruct::Commit.new(buf)]
+    else
+    end
+    [returns, nil]
+  end
+
+  def serialize_select_content_type
+    case @content_type
+    when 0x01
+      @application_data.map(&:to_vec).join.to_vec
+    when 0x02
+      @proposal.raw
+    when 0x03
+      @commit.raw
+    else
+      ''
+    end
+  end
+end
+
+class MLSStruct::FramedContentAuthData < MLSStruct::Base
+  STRUCT = [
+  ]
+end
+
+class MLSStruct::AuthenticatedContent < MLSStruct::Base
+  STRUCT = [
+    [:wire_format, :uint16],
+    [:content, :class, MLSStruct::FramedContent],
+    [:auth, :class, MLSStruct::FramedContentAuthData]
+  ]
+end
+
+class MLSStruct::FramedContentTBS < MLSStruct::Base
+  STRUCT = [
+
+  ]
 end
 
 # random
