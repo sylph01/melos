@@ -338,6 +338,54 @@ class MLSStruct::FramedContent < MLSStruct::Base
   end
 end
 
+class MLSStruct::MLSMessage < MLSStruct::Base
+  attr_accessor :version, :wire_format, :public_message, :private_message, :welcome, :group_info, :key_package
+  STRUCT = [
+    [:version, :uint16], #mls10 = 1
+    [:wire_format, :uint16],
+    [:select_wire_format, :custom]
+  ]
+
+  private
+  def deserialize_select_wire_format(buf, context)
+    returns = []
+    case context[:wire_format]
+    when 0x0001 # public_message
+      public_message, buf = MLSStruct::PublicMessage.new_and_rest(buf)
+      returns << [:public_message, public_message]
+    when 0x0002 # private_message
+      private_message, buf = MLSStruct::PrivateMessage.new_and_rest(buf)
+      returns << [:private_message, private_message]
+    when 0x0003 # welcome
+      welcome, buf = MLSStruct::Welcome.new_and_rest(buf)
+      returns << [:welcome, welcome]
+    when 0x0004 # mls_group_info
+      group_info, buf = MLSStruct::GroupInfo.new_and_rest(buf)
+      returns << [:group_info, group_info]
+    when 0x0005 # mls_key_package
+      key_package, buf = MLSStruct::KeyPackage.new_and_rest(buf)
+      returns << [:key_package, key_package]
+    else
+    end
+  end
+
+  def serialize_select_wire_format
+    case @wire_format
+    when 0x0001
+      @public_message.raw
+    when 0x0002
+      @private_message.raw
+    when 0x0003
+      @welcome.raw
+    when 0x0004
+      @group_info.raw
+    when 0x0005
+      @key_package.raw
+    else
+    end
+  end
+end
+
 class MLSStruct::FramedContentAuthData < MLSStruct::Base
   STRUCT = [
   ]
