@@ -69,44 +69,16 @@ module MLSStruct; end
 
 class MLSStruct::Base
   def initialize(buf)
-    self.class::STRUCT.each do |elem|
-      case elem[1]
-      when :uint8
-        value = buf.byteslice(0, 1).unpack1('C')
-        self.instance_variable_set("@#{elem[0]}", value)
-        buf = buf.byteslice(1..)
-      when :uint16
-        value = buf.byteslice(0, 2).unpack1('S>')
-        self.instance_variable_set("@#{elem[0]}", value)
-        buf = buf.byteslice(2..)
-      when :uint32
-        value = buf.byteslice(0, 4).unpack1('L>')
-        self.instance_variable_set("@#{elem[0]}", value)
-        buf = buf.byteslice(4..)
-      when :uint64
-        value = buf.byteslice(0, 8).unpack1('Q>')
-        self.instance_variable_set("@#{elem[0]}", value)
-        buf = buf.byteslice(8..)
-      when :vec
-        value, buf = String.parse_vec(buf)
-        self.instance_variable_set("@#{elem[0]}", value)
-      when :vecs
-        value, buf = String.parse_vec(buf)
-        array = []
-        while (value.bytesize > 0)
-          current_vec, value = String.parse_vec(value)
-          array << current_vec
-        end
-        self.instance_variable_set("@#{elem[0]}", array)
-      when :class
-        vec, buf = String.get_first_vec(buf)
-        self.instance_variable_set("@#{elem[0]}", elem[2].send(:new, vec))
-      when :custom
-        # define a custom deserializer with the name "initialize_(name)"
-        # which returns the rest of the buffer
-        buf = self.send("initialize_#{elem[0]}", buf)
-      end
-    end
+    context, _ = deserialize(buf)
+    set_instance_vars(context)
+    self
+  end
+
+  def self.new_and_rest(buf)
+    instance = self.allocate
+    context, buf = instance.send(:deserialize, buf)
+    instance.send(:set_instance_vars, context)
+    [instance, buf]
   end
 
   def raw
@@ -134,6 +106,57 @@ class MLSStruct::Base
       end
     end
     buf
+  end
+
+  private
+  def deserialize(buf)
+    context = []
+    self.class::STRUCT.each do |elem|
+      case elem[1]
+      when :uint8
+        value = buf.byteslice(0, 1).unpack1('C')
+        buf = buf.byteslice(1..)
+        context << [elem[0], value]
+      when :uint16
+        value = buf.byteslice(0, 2).unpack1('S>')
+        buf = buf.byteslice(2..)
+        context << [elem[0], value]
+      when :uint32
+        value = buf.byteslice(0, 4).unpack1('L>')
+        buf = buf.byteslice(4..)
+        context << [elem[0], value]
+      when :uint64
+        value = buf.byteslice(0, 8).unpack1('Q>')
+        buf = buf.byteslice(8..)
+        context << [elem[0], value]
+      when :vec
+        value, buf = String.parse_vec(buf)
+        context << [elem[0], value]
+      when :vecs
+        value, buf = String.parse_vec(buf)
+        array = []
+        while (value.bytesize > 0)
+          current_vec, value = String.parse_vec(value)
+          array << current_vec
+        end
+        context << [elem[0], array]
+      when :class
+        value, buf = elem[2].send(:new_and_rest, buf)
+        context << [elem[0], value]
+      when :custom
+        # define a custom deserializer with the name "deserialize_(name)"
+        # which returns pairs of (keys and values) and the rest of the buffer
+        values, buf = self.send("deserialize_#{elem[0]}", buf, context.to_h)
+        context += values
+      end
+    end
+    [context, buf]
+  end
+
+  def set_instance_vars(context)
+    context.each do |elem|
+      self.instance_variable_set("@#{elem[0]}", elem[1])
+    end
   end
 end
 
@@ -169,29 +192,31 @@ class MLSStruct::Credential < MLSStruct::Base
   ]
 
   private
-  def initialize_credential_body(buf)
+  def deserialize_credential_body(buf, context)
     # cf. Section 17.5
-    case @credential_type
+    returns = []
+    case context[:credential_type]
     when 0x0000
       # RESERVED
       raise ArgumentError.new('invalid credential type')
     when 0x0001
       # basic
       value, _ = String.parse_vec(buf)
-      @identity = value
+      returns << [:identity, value]
     when 0x0002
-      @certificates = []
+      certificates = []
       # try parsing until buffer is blank
       value, _ = String.parse_vec(buf)
       while (value.bytesize > 0)
         current_vec, value = String.get_first_vec(value)
-        @certificates << MLSStruct::Certificate.new(current_vec)
+        certificates << MLSStruct::Certificate.new(current_vec)
       end
+      returns << [:certificates, certificates]
     else
       # some values might be used for GREASE so just pass through
     end
     # this is the end of struct
-    nil
+    [returns, nil]
   end
 
   def serialize_credential_body
@@ -216,24 +241,23 @@ class MLSStruct::Sender < MLSStruct::Base
   ]
 
   private
-  def initialize_sender_content(buf)
-    case @sender_type
+  def deserialize_sender_content(buf)
+    returns = []
+    case context[:sender_type]
     when 0x01
       # member
       value = buf.byteslice(0, 4).unpack1('L>')
-      @leaf_index = value
+      returns << [leaf_index, value]
     when 0x02
       # external
       value = buf.byteslice(0, 4).unpack1('L>')
-      @sender_index = value
+      returns << [sender_index, value]
     when 0x03, 0x04
       # new_member_proposal, new_member_commit
-      ''
     else
       # reserved, other
-      ''
     end
-    nil # end of buffer
+    [returns, nil] # end of buffer
   end
 
   def serialize_sender_content
@@ -267,9 +291,10 @@ class MLSStruct::Hoge < MLSStruct::Base
 end
 
 class MLSStruct::Klass < MLSStruct::Base
-  attr_reader :hoge
+  attr_reader :hoge, :hoge2
   STRUCT = [
-    [:hoge, :class, MLSStruct::Hoge]
+    [:hoge, :class, MLSStruct::Hoge],
+    [:hoge2, :class, MLSStruct::Hoge]
   ]
 end
 
