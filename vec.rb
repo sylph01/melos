@@ -298,10 +298,10 @@ end
 class MLSStruct::FramedContent < MLSStruct::Base
   attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
   STRUCT = [
-    [:group_id, :vecs],
+    [:group_id, :vec],
     [:epoch, :uint64],
     [:sender, :class, MLSStruct::Sender],
-    [:authenticated_data, :vecs],
+    [:authenticated_data, :vec],
     [:content_type, :uint8],
     [:select_content_type, :custom]
   ]
@@ -311,8 +311,8 @@ class MLSStruct::FramedContent < MLSStruct::Base
     returns = []
     case context[:content_type]
     when 0x01
-      vecs, buf = MLSStruct::Base.vecs(buf)
-      returns << [:application_data, vecs]
+      vec, buf = String.parse_vec(buf)
+      returns << [:application_data, vec]
     when 0x02
       proposal, buf = MLSStruct::Proposal.new_and_rest(buf)
       returns << [:proposal, proposal]
@@ -327,7 +327,7 @@ class MLSStruct::FramedContent < MLSStruct::Base
   def serialize_select_content_type
     case @content_type
     when 0x01
-      @application_data.map(&:to_vec).join.to_vec
+      @application_data.to_vec
     when 0x02
       @proposal.raw
     when 0x03

@@ -52,12 +52,12 @@ sender1 = MLSStruct::Sender.new(sender1_body)
 assert_equal sender1.raw, sender1_body
 
 # basic framed content
-bfc1_group_ids = ['gid1','gid2'].map(&:to_vec).join.to_vec
+bfc1_group_ids = 'groupid1'.to_vec
 bfc1_epoch     = [0xff].pack('Q>')
 bfc1_sender    = sender1.raw
-bfc1_auth_data = ['authdata1'].map(&:to_vec).join.to_vec
+bfc1_auth_data = 'authdata1authdata1'.to_vec
 bfc1_content_type = [1].pack('C')
-bfc1_application_data = ['appdata1', 'appdata2', 'appdata3'].map(&:to_vec).join.to_vec
+bfc1_application_data = 'appdata1appdata1appdata1'.to_vec
 bfc1_body = [bfc1_group_ids, bfc1_epoch, bfc1_sender, bfc1_auth_data, bfc1_content_type, bfc1_application_data].join
 bfc1 = MLSStruct::FramedContent.new(bfc1_body)
 assert_equal bfc1.raw, bfc1_body
