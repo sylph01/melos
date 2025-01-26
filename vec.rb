@@ -114,7 +114,7 @@ class MLSStruct::Base
     value, buf = String.parse_vec(buf)
     array = []
     while (value.bytesize > 0)
-      current_instance, value = elem[2].send(:new_and_rest, value)
+      current_instance, value = String.parse_vec(value)
       array << current_instance
     end
     [array, buf]
@@ -145,7 +145,7 @@ class MLSStruct::Base
         value, buf = String.parse_vec(buf)
         context << [elem[0], value]
       when :vecs
-        array, buf = self.vecs(buf)
+        array, buf = MLSStruct::Base.vecs(buf)
         context << [elem[0], array]
       when :class
         value, buf = elem[2].send(:new_and_rest, buf)
@@ -262,17 +262,19 @@ class MLSStruct::Sender < MLSStruct::Base
     when 0x01
       # member
       value = buf.byteslice(0, 4).unpack1('L>')
+      buf = buf.byteslice(4..)
       returns << [:leaf_index, value]
     when 0x02
       # external
       value = buf.byteslice(0, 4).unpack1('L>')
+      buf = buf.byteslice(4..)
       returns << [:sender_index, value]
     when 0x03, 0x04
       # new_member_proposal, new_member_commit
     else
       # reserved, other
     end
-    [returns, nil] # end of buffer
+    [returns, buf]
   end
 
   def serialize_sender_content
@@ -309,15 +311,17 @@ class MLSStruct::FramedContent < MLSStruct::Base
     returns = []
     case context[:content_type]
     when 0x01
-      vecs, _ = self.class.vecs(buf)
+      vecs, buf = MLSStruct::Base.vecs(buf)
       returns << [:application_data, vecs]
     when 0x02
-      returns << [:proposal, MLSStruct::Proposal.new(buf)]
+      proposal, buf = MLSStruct::Proposal.new_and_rest(buf)
+      returns << [:proposal, proposal]
     when 0x03
-      returns << [:commit, MLSStruct::Commit.new(buf)]
+      commit, buf = MLSStruct::Commit.new_and_rest(buf)
+      returns << [:commit, commit]
     else
     end
-    [returns, nil]
+    [returns, buf]
   end
 
   def serialize_select_content_type
