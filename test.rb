@@ -31,3 +31,7 @@ cred2.raw == cred2_content
 
 kl = MLSStruct::Klass.new(str_vec + str_vec)
 kl.raw == str_vec + str_vec
+
+kls_raw = ['foo', 'bar', 'baz', 'qux', 'quux'].map(&:to_vec).join.to_vec
+kls = MLSStruct::Klasses.new(kls_raw)
+kls.raw == kls_raw

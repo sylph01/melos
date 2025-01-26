@@ -99,6 +99,8 @@ class MLSStruct::Base
         buf += self.instance_variable_get("@#{elem[0]}").map(&:to_vec).join.to_vec
       when :class
         buf += self.instance_variable_get("@#{elem[0]}").raw
+      when :classes
+        buf += self.instance_variable_get("@#{elem[0]}").map(&:raw).join.to_vec
       when :custom
         # define a custom serializer with the name "serialize_(name)"
         # which returns the serialized value of that instance variable
@@ -143,6 +145,14 @@ class MLSStruct::Base
       when :class
         value, buf = elem[2].send(:new_and_rest, buf)
         context << [elem[0], value]
+      when :classes
+        value, buf = String.parse_vec(buf)
+        array = []
+        while (value.bytesize > 0)
+          current_instance, value = elem[2].send(:new_and_rest, value)
+          array << current_instance
+        end
+        context << [elem[0], array]
       when :custom
         # define a custom deserializer with the name "deserialize_(name)"
         # which returns pairs of (keys and values) and the rest of the buffer
@@ -295,6 +305,13 @@ class MLSStruct::Klass < MLSStruct::Base
   STRUCT = [
     [:hoge, :class, MLSStruct::Hoge],
     [:hoge2, :class, MLSStruct::Hoge]
+  ]
+end
+
+class MLSStruct::Klasses < MLSStruct::Base
+  attr_reader :hoges
+  STRUCT = [
+    [:hoges, :classes, MLSStruct::Hoge]
   ]
 end
 
