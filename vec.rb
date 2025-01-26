@@ -386,23 +386,88 @@ class MLSStruct::MLSMessage < MLSStruct::Base
   end
 end
 
-class MLSStruct::FramedContentAuthData < MLSStruct::Base
+class MLSStruct::FramedContentTBS < MLSStruct::Base
+  attr_reader :version, :wire_format, :content, :context
   STRUCT = [
-  ]
-end
-
-class MLSStruct::AuthenticatedContent < MLSStruct::Base
-  STRUCT = [
+    [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
     [:content, :class, MLSStruct::FramedContent],
-    [:auth, :class, MLSStruct::FramedContentAuthData]
+    [:select_sender_type, :custom]
   ]
+
+  private
+  def deserialize_select_sender_type(buf, context)
+    returns = []
+    case context[:content].sender.sender_type
+    when 0x01, 0x04 #member, new_member_commit
+      group_context, buf = MLSStruct::GroupContext.new_and_rest(buf)
+      returns << [:context, group_context]
+    when 0x02, 0x03 #external, new_member_proposal
+      # add an empty struct, aka nothing
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_sender_type
+    case @content.sender.sender_type
+    when 0x01, 0x04
+      @context.raw
+    when 0x02, 0x03
+      ''
+    else
+      ''
+    end
+  end
 end
 
-class MLSStruct::FramedContentTBS < MLSStruct::Base
-  STRUCT = [
+class MLSStruct::FramedContentAuthData
+  # construct from FramedContent instead of raw binary
+  def initialize(wire_format, framed_content)
+    data_to_be_signed = [[0x01].pack('S>'), [wire_format].pack('S>'), framed_content.raw].join
+    @framed_content_tbs = MLSStruct::FramedContentTBS.new(data_to_be_signed) # when creating this, we might need group context too
 
-  ]
+    @signature = @framed_content_tbs.raw # will use cipher suite later to sign
+    case framed_content.content_type
+    when 0x03
+      # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+      # where do these two values come from?
+      @confirmation_tag = @framed_content_tbs.group_context.confirmed_transcript_hash
+    when 0x01, 0x02
+      # empty struct, thus do nothing
+    else
+    end
+  end
+
+  def raw
+    case framed_content.content_type
+    when 0x03
+      @signature.to_vec + @confirmation_tag.to_vec
+    when 0x01, 0x02
+      @signature.to_vec
+    else
+      ''
+    end
+  end
+end
+
+
+class MLSStruct::AuthenticatedContent
+  # construct from WireFormat and FramedContent
+  def initialize(wire_format, framed_content)
+    @wire_format = wire_format
+    @content = framed_content
+    @auth = MLSStruct::FramedContentAuthData.new(wire_format, framed_content)
+  end
+
+  def raw
+    [
+      [@wire_format].pack('S>'),
+      @content.raw,
+      @auth.raw
+    ].join
+  end
 end
 
 # random
