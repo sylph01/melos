@@ -85,10 +85,9 @@ class MLSStruct::Base
     buf = ''
     self.class::STRUCT.each do |elem|
       case elem[1]
-      when :custom
-        # define a custom serializer with the name "serialize_(name)"
-        # which returns the serialized value of that instance variable
-        buf += self.send("serialize_#{elem[0]}")
+      when :select
+        value = self.instance_variable_get("@#{elem[0]}")
+        buf += serialize_select_elem(value, elem[3])
       else
         value = self.instance_variable_get("@#{elem[0]}")
         buf += serialize_elem(value, elem[1])
@@ -107,16 +106,26 @@ class MLSStruct::Base
     [array, buf]
   end
 
+  # context here takes a hash
+  # returns [value, rest_of_buffer]
+  # value could return nil, which means predicate was not applicable
+  # predicate takes the context and returns true or false
+  def deserialize_select_elem_with_context(buf, context, predicate, type, type_param)
+    if predicate.(context)
+      deserialize_elem(buf, type, type_param)
+    else
+      [nil, buf]
+    end
+  end
+
   private
   def deserialize(buf)
     context = []
     self.class::STRUCT.each do |elem|
       case elem[1]
-      when :custom
-        # define a custom deserializer with the name "deserialize_(name)"
-        # which returns pairs of (keys and values) and the rest of the buffer
-        values, buf = self.send("deserialize_#{elem[0]}", buf, context.to_h)
-        context += values
+      when :select
+        value, buf = deserialize_select_elem_with_context(buf, context.to_h, elem[2], elem[3], elem[4])
+        context << [elem[0], value]
       else
         value, buf = deserialize_elem(buf, elem[1], elem[2])
         context << [elem[0], value]
@@ -203,6 +212,14 @@ class MLSStruct::Base
       end
     when :opaque
       value
+    end
+  end
+
+  def serialize_select_elem(value, type)
+    if value.nil?
+      ''
+    else
+      serialize_elem(value, type)
     end
   end
 end
@@ -335,39 +352,10 @@ class MLSStruct::FramedContent < MLSStruct::Base
     [:sender, :class, MLSStruct::Sender],
     [:authenticated_data, :vec],
     [:content_type, :uint8],
-    [:select_content_type, :custom]
+    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec]
+    #[:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
+    #[:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
   ]
-
-  private
-  def deserialize_select_content_type(buf, context)
-    returns = []
-    case context[:content_type]
-    when 0x01
-      vec, buf = String.parse_vec(buf)
-      returns << [:application_data, vec]
-    when 0x02
-      proposal, buf = MLSStruct::Proposal.new_and_rest(buf)
-      returns << [:proposal, proposal]
-    when 0x03
-      commit, buf = MLSStruct::Commit.new_and_rest(buf)
-      returns << [:commit, commit]
-    else
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_content_type
-    case @content_type
-    when 0x01
-      @application_data.to_vec
-    when 0x02
-      @proposal.raw
-    when 0x03
-      @commit.raw
-    else
-      ''
-    end
-  end
 end
 
 class MLSStruct::MLSMessage < MLSStruct::Base
