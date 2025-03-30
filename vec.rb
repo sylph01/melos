@@ -538,6 +538,55 @@ class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
   ]
 end
 
+## 6.3
+
+class MLSStruct::PrivateMessage < MLSStruct::Base
+  attr_reader :group_id, :epoch, :content_type, :authenticated_data, :encrypted_sender_data, :ciphertext
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:content_type, :uint8],
+    [:authenticated_data, :vec],
+    [:encrypted_sender_data, :vec],
+    [:ciphertext, :vec]
+  ]
+end
+
+class MLSStruct::PrivateMessageContent
+  # bytes -> struct: decode the content and auth field, rest is padding
+  # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
+end
+
+class MLSStruct::PrivateContentAAD
+  attr_reader :group_id, :epoch, :content_type, :authenticated_data
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:content_type, :uint8],
+    [:authenticated_data, :vec]
+  ]
+end
+
+## 6.3.2
+
+class MLSStruct::SenderData < MLSStruct::Base
+  attr_reader :leaf_index, :generation, :reuse_guard
+  STRUCT = [
+    [:leaf_index, :uint32],
+    [:generation, :uint32],
+    [:reuse_guard, :opaque, 4]
+  ]
+end
+
+class MLSStruct::SenderDataAAD < MLSStruct::Base
+  attr_reader :group_id, :epoch, :content_type
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:content_type, :uint8]
+  ]
+end
+
 # 12.4.3.1
 
 class MLSStruct::PathSecret < MLSStruct::Base
