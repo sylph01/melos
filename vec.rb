@@ -521,7 +521,7 @@ class MLSStruct::PublicMessage < MLSStruct::Base
   def serialize_select_sender_type
     case @content.sender.sender_type
     when 0x01
-      @membership_tag.raw
+      @membership_tag.to_vec
     when 0x02, 0x03, 0x04
       ''
     else
