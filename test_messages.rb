@@ -68,6 +68,10 @@ mls_key_package = MLSStruct::MLSMessage.new(from_hex(message_vector["mls_key_pac
 assert_equal to_hex(mls_key_package.raw), message_vector["mls_key_package"]
 puts "[s] mls_key_package"
 
+private_message = MLSStruct::MLSMessage.new(from_hex(message_vector["private_message"]))
+assert_equal to_hex(private_message.raw), message_vector["private_message"]
+puts "[s] private_message"
+
 # public_message_application = MLSStruct::PublicMessage.new(from_hex(message_vector["public_message_application"]))
 # assert_equal to_hex(public_message_application.raw), message_vector["public_message_application"]
 # puts "[s] public_message_application"
