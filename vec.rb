@@ -257,182 +257,6 @@ class MLSStruct::Credential < MLSStruct::Base
   ]
 end
 
-# Section 6.1
-class MLSStruct::Sender < MLSStruct::Base
-  attr_reader :sender_type, :leaf_index, :sender_index
-  STRUCT = [
-    [:sender_type, :uint8],
-    [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == 0x01}, :uint32], # 0x01 = member
-    [:sender_index, :select, ->(ctx){ctx[:sender_type] == 0x02}, :uint32], # 0x02 = external
-  ]
-end
-
-class MLSStruct::FramedContent < MLSStruct::Base
-  attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
-  STRUCT = [
-    [:group_id, :vec],
-    [:epoch, :uint64],
-    [:sender, :class, MLSStruct::Sender],
-    [:authenticated_data, :vec],
-    [:content_type, :uint8],
-    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec],
-    #[:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
-    #[:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
-  ]
-end
-
-class MLSStruct::MLSMessage < MLSStruct::Base
-  attr_accessor :version, :wire_format, :public_message, :private_message, :welcome, :group_info, :key_package
-  STRUCT = [
-    [:version, :uint16], #mls10 = 1
-    [:wire_format, :uint16],
-    # [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, MLSStruct::PublicMessage],
-    # [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, MLSStruct::PrivateMessage],
-    # [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, MLSStruct::Welcome],
-    # [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLSStruct::GroupInfo],
-    # [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLSStruct::KeyPackage]
-  ]
-end
-
-class MLSStruct::FramedContentTBS < MLSStruct::Base
-  attr_reader :version, :wire_format, :content, :context
-  STRUCT = [
-    [:version, :uint16], #mls10 = 1
-    [:wire_format, :uint16],
-    [:content, :class, MLSStruct::FramedContent],
-    # [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, MLSStruct::GroupContext]
-  ]
-end
-
-class MLSStruct::FramedContentAuthData; end
-
-# class MLSStruct::FramedContentAuthData < MLSStruct::Base
-#   attr_accessor :content_type
-#   attr_reader :signature, :confirmation_tag
-#   STRUCT = [
-#     [:signature, :vec], # SignWithLabel(., "FramedContentTBS", FramedContentTBS)
-#     [:select_content_type, :custom]
-#   ]
-
-#   private
-#   def deserialize_select_content_type(buf, context)
-#     returns = []
-#     case @content_type
-#     when 0x03 # commit
-#       mac, buf = String.parse_vec(buf) # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
-#       returns << [:confirmation_tag, mac]
-#     else
-#       # add nothing
-#     end
-#     [returns, buf]
-#   end
-
-#   def serialize_select_content_type
-#     case @content_type
-#     when 0x03 # commit
-#       @confirmation_tag.to_vec
-#     else
-#       ''
-#     end
-#   end
-# end
-
-# class MLSStruct::FramedContentAuthData
-#   # construct from FramedContent instead of raw binary
-#   def initialize(wire_format, framed_content)
-#     data_to_be_signed = [[0x01].pack('S>'), [wire_format].pack('S>'), framed_content.raw].join
-#     @framed_content_tbs = MLSStruct::FramedContentTBS.new(data_to_be_signed) # when creating this, we might need group context too
-
-#     @signature = @framed_content_tbs.raw # will use cipher suite later to sign
-#     case framed_content.content_type
-#     when 0x03
-#       # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
-#       # where do these two values come from?
-#       @confirmation_tag = @framed_content_tbs.group_context.confirmed_transcript_hash
-#     when 0x01, 0x02
-#       # empty struct, thus do nothing
-#     else
-#     end
-#   end
-
-#   def raw
-#     case framed_content.content_type
-#     when 0x03
-#       @signature.to_vec + @confirmation_tag.to_vec
-#     when 0x01, 0x02
-#       @signature.to_vec
-#     else
-#       ''
-#     end
-#   end
-# end
-
-
-class MLSStruct::AuthenticatedContent
-  # construct from WireFormat and FramedContent
-  def initialize(wire_format, framed_content)
-    @wire_format = wire_format
-    @content = framed_content
-    @auth = MLSStruct::FramedContentAuthData.new(wire_format, framed_content)
-  end
-
-  def raw
-    [
-      [@wire_format].pack('S>'),
-      @content.raw,
-      @auth.raw
-    ].join
-  end
-end
-
-## 6.2
-
-class MLSStruct::PublicMessage < MLSStruct::Base
-  attr_reader :content, :auth, :membership_tag
-  STRUCT = [
-    [:content, :class, MLSStruct::FramedContent],
-    [:auth, :class, MLSStruct::FramedContentAuthData],
-    [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
-  ]
-end
-
-class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
-  attr_reader :content_tbs, :auth
-  STRUCT = [
-    [:content_tbs, :class, MLSStruct::FramedContentTBS],
-    [:auth, :class, MLSStruct::FramedContentAuthData]
-  ]
-end
-
-## 6.3
-
-class MLSStruct::PrivateMessage < MLSStruct::Base
-  attr_reader :group_id, :epoch, :content_type, :authenticated_data, :encrypted_sender_data, :ciphertext
-  STRUCT = [
-    [:group_id, :vec],
-    [:epoch, :uint64],
-    [:content_type, :uint8],
-    [:authenticated_data, :vec],
-    [:encrypted_sender_data, :vec],
-    [:ciphertext, :vec]
-  ]
-end
-
-class MLSStruct::PrivateMessageContent
-  # bytes -> struct: decode the content and auth field, rest is padding
-  # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
-end
-
-class MLSStruct::PrivateContentAAD
-  attr_reader :group_id, :epoch, :content_type, :authenticated_data
-  STRUCT = [
-    [:group_id, :vec],
-    [:epoch, :uint64],
-    [:content_type, :uint8],
-    [:authenticated_data, :vec]
-  ]
-end
-
 ## 6.3.2
 
 class MLSStruct::SenderData < MLSStruct::Base
@@ -675,24 +499,6 @@ class MLSStruct::GroupContext < MLSStruct::Base
   ]
 end
 
-## 8.2
-
-class MLSStruct::ConfirmedTranscriptHash < MLSStruct::Base
-  attr_reader :wire_format, :content, :signature
-  STRUCT = [
-    [:wire_format, :uint16],
-    [:content, :class, MLSStruct::FramedContent], # with content_type == commit
-    [:signature, :vec]
-  ]
-end
-
-class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base
-  attr_reader :confirmation_tag
-  STRUCT = [
-    [:confirmation_tag, :vec]
-  ]
-end
-
 ## 8.4
 
 class MLSStruct::PreSharedKeyID < MLSStruct::Base
@@ -930,6 +736,199 @@ class MLSStruct::Node < MLSStruct::Base
     [:node_type, :uint8],
     [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLSStruct::LeafNode], # leaf
     [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLSStruct::ParentNode] # parent
+  ]
+end
+
+# Section 6.1
+class MLSStruct::Sender < MLSStruct::Base
+  attr_reader :sender_type, :leaf_index, :sender_index
+  STRUCT = [
+    [:sender_type, :uint8],
+    [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == 0x01}, :uint32], # 0x01 = member
+    [:sender_index, :select, ->(ctx){ctx[:sender_type] == 0x02}, :uint32], # 0x02 = external
+  ]
+end
+
+# class MLSStruct::FramedContentAuthData < MLSStruct::Base
+#   attr_accessor :content_type
+#   attr_reader :signature, :confirmation_tag
+#   STRUCT = [
+#     [:signature, :vec], # SignWithLabel(., "FramedContentTBS", FramedContentTBS)
+#     [:select_content_type, :custom]
+#   ]
+
+#   private
+#   def deserialize_select_content_type(buf, context)
+#     returns = []
+#     case @content_type
+#     when 0x03 # commit
+#       mac, buf = String.parse_vec(buf) # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+#       returns << [:confirmation_tag, mac]
+#     else
+#       # add nothing
+#     end
+#     [returns, buf]
+#   end
+
+#   def serialize_select_content_type
+#     case @content_type
+#     when 0x03 # commit
+#       @confirmation_tag.to_vec
+#     else
+#       ''
+#     end
+#   end
+# end
+
+# class MLSStruct::FramedContentAuthData
+#   # construct from FramedContent instead of raw binary
+#   def initialize(wire_format, framed_content)
+#     data_to_be_signed = [[0x01].pack('S>'), [wire_format].pack('S>'), framed_content.raw].join
+#     @framed_content_tbs = MLSStruct::FramedContentTBS.new(data_to_be_signed) # when creating this, we might need group context too
+
+#     @signature = @framed_content_tbs.raw # will use cipher suite later to sign
+#     case framed_content.content_type
+#     when 0x03
+#       # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+#       # where do these two values come from?
+#       @confirmation_tag = @framed_content_tbs.group_context.confirmed_transcript_hash
+#     when 0x01, 0x02
+#       # empty struct, thus do nothing
+#     else
+#     end
+#   end
+
+#   def raw
+#     case framed_content.content_type
+#     when 0x03
+#       @signature.to_vec + @confirmation_tag.to_vec
+#     when 0x01, 0x02
+#       @signature.to_vec
+#     else
+#       ''
+#     end
+#   end
+# end
+
+class MLSStruct::FramedContent < MLSStruct::Base
+  attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:sender, :class, MLSStruct::Sender],
+    [:authenticated_data, :vec],
+    [:content_type, :uint8],
+    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec],
+    [:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
+    [:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
+  ]
+end
+
+class MLSStruct::FramedContentTBS < MLSStruct::Base
+  attr_reader :version, :wire_format, :content, :context
+  STRUCT = [
+    [:version, :uint16], #mls10 = 1
+    [:wire_format, :uint16],
+    [:content, :class, MLSStruct::FramedContent],
+    [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, MLSStruct::GroupContext]
+  ]
+end
+
+class MLSStruct::FramedContentAuthData; end
+
+class MLSStruct::AuthenticatedContent
+  # construct from WireFormat and FramedContent
+  def initialize(wire_format, framed_content)
+    @wire_format = wire_format
+    @content = framed_content
+    @auth = MLSStruct::FramedContentAuthData.new(wire_format, framed_content)
+  end
+
+  def raw
+    [
+      [@wire_format].pack('S>'),
+      @content.raw,
+      @auth.raw
+    ].join
+  end
+end
+
+## 6.2
+
+class MLSStruct::PublicMessage < MLSStruct::Base
+  attr_reader :content, :auth, :membership_tag
+  STRUCT = [
+    [:content, :class, MLSStruct::FramedContent],
+    [:auth, :class, MLSStruct::FramedContentAuthData],
+    [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
+  ]
+end
+
+class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
+  attr_reader :content_tbs, :auth
+  STRUCT = [
+    [:content_tbs, :class, MLSStruct::FramedContentTBS],
+    [:auth, :class, MLSStruct::FramedContentAuthData]
+  ]
+end
+
+## 6.3
+
+class MLSStruct::PrivateMessage < MLSStruct::Base
+  attr_reader :group_id, :epoch, :content_type, :authenticated_data, :encrypted_sender_data, :ciphertext
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:content_type, :uint8],
+    [:authenticated_data, :vec],
+    [:encrypted_sender_data, :vec],
+    [:ciphertext, :vec]
+  ]
+end
+
+class MLSStruct::PrivateMessageContent
+  # bytes -> struct: decode the content and auth field, rest is padding
+  # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
+end
+
+class MLSStruct::PrivateContentAAD
+  attr_reader :group_id, :epoch, :content_type, :authenticated_data
+  STRUCT = [
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:content_type, :uint8],
+    [:authenticated_data, :vec]
+  ]
+end
+
+## 8.2
+
+class MLSStruct::ConfirmedTranscriptHash < MLSStruct::Base
+  attr_reader :wire_format, :content, :signature
+  STRUCT = [
+    [:wire_format, :uint16],
+    [:content, :class, MLSStruct::FramedContent], # with content_type == commit
+    [:signature, :vec]
+  ]
+end
+
+class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base
+  attr_reader :confirmation_tag
+  STRUCT = [
+    [:confirmation_tag, :vec]
+  ]
+end
+
+class MLSStruct::MLSMessage < MLSStruct::Base
+  attr_accessor :version, :wire_format, :public_message, :private_message, :welcome, :group_info, :key_package
+  STRUCT = [
+    [:version, :uint16], #mls10 = 1
+    [:wire_format, :uint16],
+    [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, MLSStruct::PublicMessage],
+    [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, MLSStruct::PrivateMessage],
+    [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, MLSStruct::Welcome],
+    [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLSStruct::GroupInfo],
+    [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLSStruct::KeyPackage]
   ]
 end
 
