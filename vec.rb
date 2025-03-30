@@ -101,6 +101,12 @@ class MLSStruct::Base
         buf += self.instance_variable_get("@#{elem[0]}").raw
       when :classes
         buf += self.instance_variable_get("@#{elem[0]}").map(&:raw).join.to_vec
+      when :optional
+        if self.instance_variable_get("@#{elem[0]}").nil?
+          buf += [0].pack('C')
+        else
+          buf += [1].pack('C') + self.instance_variable_get("@#{elem[0]}").raw
+        end
       when :custom
         # define a custom serializer with the name "serialize_(name)"
         # which returns the serialized value of that instance variable
@@ -158,6 +164,17 @@ class MLSStruct::Base
           array << current_instance
         end
         context << [elem[0], array]
+      when :optional
+        presence = buf.byteslice(0, 1).unpack1('C')
+        case presence
+        when 0
+          value = nil
+          buf.byteslice(1..)
+        when 1
+          # as of RFC 9420, optional always takes a class
+          value, buf = elem[2].send(:new_and_rest, buf)
+        end
+        context << [elem[0], value]
       when :custom
         # define a custom deserializer with the name "deserialize_(name)"
         # which returns pairs of (keys and values) and the rest of the buffer
