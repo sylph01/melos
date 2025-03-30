@@ -88,12 +88,18 @@ class MLSStruct::Base
       value = buf.byteslice(0, 8).unpack1('Q>')
       buf = buf.byteslice(8..)
     when :vec
-      value, buf = String.parse_vec(buf)
+      if buf.length == 0
+        value = nil
+      else
+        value, buf = String.parse_vec(buf)
+      end
     when :vecs
       value, buf = MLSStruct::Base.vecs(buf)
     when :class
       value, buf = type_param.send(:new_and_rest, buf)
     when :classes
+      # prefix, length = buf.get_prefix_and_length
+      # puts "#{prefix}, #{length}"
       vec, buf = String.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
@@ -129,7 +135,11 @@ class MLSStruct::Base
     when :uint64
       [value].pack('Q>')
     when :vec
-      value.to_vec
+      if value.nil?
+        ''
+      else
+        value.to_vec
+      end
     when :vecs
       value.map(&:to_vec).join.to_vec
     when :class
