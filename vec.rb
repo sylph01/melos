@@ -487,11 +487,13 @@ class MLSStruct::AuthenticatedContent
   end
 end
 
+## 6.2
+
 class MLSStruct::PublicMessage < MLSStruct::Base
   attr_reader :content, :auth, :membership_tag
   STRUCT = [
-    [:content, :class, FramedContent],
-    [:auth, :class, FramedContentAuthData],
+    [:content, :class, MLSStruct::FramedContent],
+    [:auth, :class, MLSStruct::FramedContentAuthData],
     [:select_sender_type, :custom]
   ]
 
@@ -520,6 +522,14 @@ class MLSStruct::PublicMessage < MLSStruct::Base
       ''
     end
   end
+end
+
+class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
+  attr_reader :content_tbs, :auth
+  STRUCT = [
+    [:content_tbs, :class, MLSStruct::FramedContentTBS],
+    [:auth, :class, MLSStruct::FramedContentAuthData]
+  ]
 end
 
 # 12.4.3.1
