@@ -961,6 +961,42 @@ class MLSStruct::PSKLabel < MLSStruct::Base
   ]
 end
 
+## 10
+
+class MLSStruct::KeyPackage < MLSStruct::Base
+  attr_reader :version, :cipher_suite, :init_key, :leaf_node, :extensions, :signature
+  STRUCT = [
+    [:version, :uint16],
+    [:cipher_suite, :uint16],
+    [:init_key, :vec], # HPKEPublicKey
+    [:leaf_node, :class, MLSStruct::LeafNode],
+    [:extensions, :classes, MLSStruct::Extension],
+    [:signature, :vec] # SignWithLabel(., "KeyPackageTBS", KeyPackageTBS)
+  ]
+end
+
+class MLSStruct::KeyPackageTBS < MLSStruct::Base
+  attr_reader :version, :cipher_suite, :init_key, :leaf_node, :extensions
+  STRUCT = [
+    [:version, :uint16],
+    [:cipher_suite, :uint16],
+    [:init_key, :vec], # HPKEPublicKey
+    [:leaf_node, :class, MLSStruct::LeafNode],
+    [:extensions, :classes, MLSStruct::Extension]
+  ]
+end
+
+## 11
+
+class MLSStruct::RequiredCapabilities < MLSStruct::Base
+  attr_reader :extension_types, :proposal_types, :credential_types
+  STRUCT = [
+    [:extension_types, :vec], # vec of uint16
+    [:proposal_types, :vec], # vec of uint16
+    [:credential_types, :vec] # vec of uint16
+  ]
+end
+
 # 12.4.3.1
 
 class MLSStruct::PathSecret < MLSStruct::Base
