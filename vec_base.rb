@@ -47,9 +47,9 @@ class String
       raise ArgumentError.new('invalid header')
     end
 
-    puts length
-    puts to_hex(str)
-    puts to_hex(rest ? rest : '')
+    # puts length
+    # puts to_hex(str)
+    # puts to_hex(rest ? rest : '')
     [str, rest]
   end
 

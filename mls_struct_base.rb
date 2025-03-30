@@ -55,7 +55,6 @@ class MLSStruct::Base
   def deserialize(buf)
     context = []
     self.class::STRUCT.each do |elem|
-      puts elem[0]
       case elem[1]
       when :select
         value, buf = deserialize_select_elem_with_context(buf, context.to_h, elem[2], elem[3], elem[4])
@@ -103,10 +102,10 @@ class MLSStruct::Base
       end
     when :optional
       presence = buf.byteslice(0, 1).unpack1('C')
+      buf = buf.byteslice(1..)
       case presence
       when 0
         value = nil
-        buf = buf.byteslice(1..)
       when 1
         # as of RFC 9420, optional always takes a class
         value, buf = type_param.send(:new_and_rest, buf)
