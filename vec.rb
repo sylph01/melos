@@ -767,7 +767,7 @@ class MLSStruct::LeafNodeTBS < MLSStruct::Base
     when 0x01
       ''
     when 0x02, 0x03
-      @group_id.to_vec + @leaf_index.pack('L>')
+      @group_id.to_vec + [@leaf_index].pack('L>')
     else
       ''
     end
@@ -798,6 +798,158 @@ class MLSStruct::UpdatePath < MLSStruct::Base
     [:leaf_node, :class, MLSStruct::LeafNode],
     [:nodes, :classes, MLSStruct::UpdatePathNode]
   ]
+end
+
+## 7.8
+
+## NodeType: uint8 enum
+
+class MLSStruct::TreeHashInput < MLSStruct::Base
+  attr_reader :node_type, :leaf_node, :parent_node
+  STRUCT = [
+    [:node_type, :uint8],
+    [:select_node_type, :custom]
+  ]
+
+  private
+  def deserialize_select_node_type(buf, context)
+    returns = []
+    case context[:node_type]
+    when 0x01 # key_package
+      leaf_node, buf = MLSStruct::LeafNodeHashInput.new_and_rest(buf)
+      returns << [:leaf_node, leaf_node]
+    when 0x02 # update
+      parent_node, buf = MLSStruct::ParentNodeHashInput.new_and_rest(buf)
+      returns << [:parent_node, parent_node]
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_node_type
+    case @node_type
+    when 0x01
+      @leaf_node.raw
+    when 0x02
+      @parent_node.raw
+    else
+      ''
+    end
+  end
+end
+
+class MLSStruct::LeafNodeHashInput < MLSStruct::Base
+  attr_reader :leaf_index, :leaf_node
+  STRUCT = [
+    [:leaf_index, :uint32],
+    [:leaf_node, :optional, MLSStruct::LeafNode]
+  ]
+end
+
+class MLSStruct::ParentNodeHashInput < MLSStruct::Base
+  attr_reader :parent_node, :left_hash, :right_hash
+  STRUCT = [
+    [:parent_node, :optional, MLSStruct::ParentNode],
+    [:left_hash, :vec],
+    [:right_hash, :vec]
+  ]
+end
+
+## 7.9
+
+class MLSStruct::ParentHashInput < MLSStruct::Base
+  attr_reader :encryption_key, :parent_hash, :original_sibling_tree_hash
+  STRUCT = [
+    [:encryption_key, :vec], # HPKEPublicKey
+    [:parent_hash, :vec],
+    [:original_sibling_tree_hash, :vec]
+  ]
+end
+
+## 8
+
+class MLSStruct::KDFLabel < MLSStruct::Base
+  attr_reader :length, :label, :context
+  STRUCT = [
+    [:length, :uint16],
+    [:label, :vec],
+    [:context, :vec]
+  ]
+end
+
+## 8.1
+
+class MLSStruct::GroupContext < MLSStruct::Base
+  attr_reader :version, :cipher_suite, :group_id, :epoch, :tree_hash, :confirmed_transcript_hash, :extensions
+  STRUCT = [
+    [:version, :uint16],
+    [:cipher_suite, :uint16],
+    [:group_id, :vec],
+    [:epoch, :uint64],
+    [:tree_hash, :vec],
+    [:confirmed_transcript_hash, :vec],
+    [:extensions, :classes, MLSStruct::Extension]
+  ]
+end
+
+## 8.2
+
+class MLSStruct::ConfirmedTranscriptHash < MLSStruct::Base
+  attr_reader :wire_format, :content, :signature
+  STRUCT = [
+    [:wire_format, :uint16],
+    [:content, :class, MLSStruct::FramedContent], # with content_type == commit
+    [:signature, :vec]
+  ]
+end
+
+class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base
+  attr_reader :confirmation_tag
+  STRUCT = [
+    [:confirmation_tag, :vec]
+  ]
+end
+
+## 8.3
+
+class MLSStruct::PreSharedKeyID < MLSStruct::Base
+  attr_reader :psktype, :psk_id, :psk_group_id, :psk_epoch, :psk_nonce
+  STRUCT = [
+    [:psktype, :uint8],
+    [:select_psktype, :custom],
+    [:psk_nonce, :vec]
+  ]
+
+  private
+  def deserialize_select_psktype(buf, context)
+    returns = []
+    case context[:psktype]
+    when 0x01 # key_package
+      psk_id, buf = String.parse_vec(buf)
+      returns << [:psk_id, psk_id]
+    when 0x02 # update
+      psk_group_id, buf = String.parse_vec(buf)
+      psk_epoch = buf.byteslice(0, 8).unpack1('Q>') # uint64
+      buf = buf.byteslice(8..)
+      returns << [:psk_group_id, psk_group_id]
+      returns << [:psk_epoch, psk_epoch]
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_psktype
+    case @psktype
+    when 0x01
+      @psk_id.to_vec
+    when 0x02
+      @psk_group_id.to_vec + [@psk_epoch].pack('Q>')
+    else
+      ''
+    end
+  end
 end
 
 # 12.4.3.1
