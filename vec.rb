@@ -867,6 +867,8 @@ class MLSStruct::PathSecret < MLSStruct::Base
   ]
 end
 
+### ---------------------------------------------------------------------- ###
+
 # random
 class MLSStruct::Hoge < MLSStruct::Base
   attr_reader :optional
