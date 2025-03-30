@@ -487,6 +487,50 @@ class MLSStruct::AuthenticatedContent
   end
 end
 
+class MLSStruct::PublicMessage < MLSStruct::Base
+  attr_reader :content, :auth, :membership_tag
+  STRUCT = [
+    [:content, :class, FramedContent],
+    [:auth, :class, FramedContentAuthData],
+    [:select_sender_type, :custom]
+  ]
+
+  private
+  def deserialize_select_sender_type(buf, context)
+    returns = []
+    case context[:content].sender.sender_type
+    when 0x01 #member
+      mac, buf = String.parse_vec(buf) # MAC is opaque <V>
+      returns << [:membership_tag, mac]
+    when 0x02, 0x03, 0x04 #external, new_member_proposal, new_member_commit
+      # add an empty struct, aka nothing
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_sender_type
+    case @content.sender.sender_type
+    when 0x01
+      @membership_tag.raw
+    when 0x02, 0x03, 0x04
+      ''
+    else
+      ''
+    end
+  end
+end
+
+# 12.4.3.1
+
+class MLSStruct::PathSecret < MLSStruct::Base
+  attr_reader :path_secret
+  STRUCT = [
+    [:path_secret, :vec]
+  ]
+end
+
 # random
 class MLSStruct::Hoge < MLSStruct::Base
   attr_reader :optional
