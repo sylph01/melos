@@ -85,34 +85,13 @@ class MLSStruct::Base
     buf = ''
     self.class::STRUCT.each do |elem|
       case elem[1]
-      when :uint8
-        buf += [self.instance_variable_get("@#{elem[0]}")].pack('C')
-      when :uint16
-        buf += [self.instance_variable_get("@#{elem[0]}")].pack('S>')
-      when :uint32
-        buf += [self.instance_variable_get("@#{elem[0]}")].pack('L>')
-      when :uint64
-        buf += [self.instance_variable_get("@#{elem[0]}")].pack('Q>')
-      when :vec
-        buf += self.instance_variable_get("@#{elem[0]}").to_vec
-      when :vecs
-        buf += self.instance_variable_get("@#{elem[0]}").map(&:to_vec).join.to_vec
-      when :class
-        buf += self.instance_variable_get("@#{elem[0]}").raw
-      when :classes
-        buf += self.instance_variable_get("@#{elem[0]}").map(&:raw).join.to_vec
-      when :optional
-        if self.instance_variable_get("@#{elem[0]}").nil?
-          buf += [0].pack('C')
-        else
-          buf += [1].pack('C') + self.instance_variable_get("@#{elem[0]}").raw
-        end
-      when :opaque
-        buf += self.instance_variable_get("@#{elem[0]}")
       when :custom
         # define a custom serializer with the name "serialize_(name)"
         # which returns the serialized value of that instance variable
         buf += self.send("serialize_#{elem[0]}")
+      else
+        value = self.instance_variable_get("@#{elem[0]}")
+        buf += serialize_elem(value, elem[1])
       end
     end
     buf
@@ -133,59 +112,14 @@ class MLSStruct::Base
     context = []
     self.class::STRUCT.each do |elem|
       case elem[1]
-      when :uint8
-        value = buf.byteslice(0, 1).unpack1('C')
-        buf = buf.byteslice(1..)
-        context << [elem[0], value]
-      when :uint16
-        value = buf.byteslice(0, 2).unpack1('S>')
-        buf = buf.byteslice(2..)
-        context << [elem[0], value]
-      when :uint32
-        value = buf.byteslice(0, 4).unpack1('L>')
-        buf = buf.byteslice(4..)
-        context << [elem[0], value]
-      when :uint64
-        value = buf.byteslice(0, 8).unpack1('Q>')
-        buf = buf.byteslice(8..)
-        context << [elem[0], value]
-      when :vec
-        value, buf = String.parse_vec(buf)
-        context << [elem[0], value]
-      when :vecs
-        array, buf = MLSStruct::Base.vecs(buf)
-        context << [elem[0], array]
-      when :class
-        value, buf = elem[2].send(:new_and_rest, buf)
-        context << [elem[0], value]
-      when :classes
-        value, buf = String.parse_vec(buf)
-        array = []
-        while (value.bytesize > 0)
-          current_instance, value = elem[2].send(:new_and_rest, value)
-          array << current_instance
-        end
-        context << [elem[0], array]
-      when :optional
-        presence = buf.byteslice(0, 1).unpack1('C')
-        case presence
-        when 0
-          value = nil
-          buf = buf.byteslice(1..)
-        when 1
-          # as of RFC 9420, optional always takes a class
-          value, buf = elem[2].send(:new_and_rest, buf)
-        end
-        context << [elem[0], value]
-      when :opaque
-        value = buf.byteslice(0, elem[2].to_i)
-        buf = buf.byteslice((elem[2].to_i)..)
-        context << [elem[0], value]
       when :custom
         # define a custom deserializer with the name "deserialize_(name)"
         # which returns pairs of (keys and values) and the rest of the buffer
         values, buf = self.send("deserialize_#{elem[0]}", buf, context.to_h)
         context += values
+      else
+        value, buf = deserialize_elem(buf, elem[1], elem[2])
+        context << [elem[0], value]
       end
     end
     [context, buf]
@@ -194,6 +128,81 @@ class MLSStruct::Base
   def set_instance_vars(context)
     context.each do |elem|
       self.instance_variable_set("@#{elem[0]}", elem[1])
+    end
+  end
+
+  def deserialize_elem(buf, type, type_param)
+    case type
+    when :uint8
+      value = buf.byteslice(0, 1).unpack1('C')
+      buf = buf.byteslice(1..)
+    when :uint16
+      value = buf.byteslice(0, 2).unpack1('S>')
+      buf = buf.byteslice(2..)
+    when :uint32
+      value = buf.byteslice(0, 4).unpack1('L>')
+      buf = buf.byteslice(4..)
+    when :uint64
+      value = buf.byteslice(0, 8).unpack1('Q>')
+      buf = buf.byteslice(8..)
+    when :vec
+      value, buf = String.parse_vec(buf)
+    when :vecs
+      value, buf = MLSStruct::Base.vecs(buf)
+    when :class
+      value, buf = type_param.send(:new_and_rest, buf)
+    when :classes
+      vec, buf = String.parse_vec(buf)
+      value = []
+      while (vec.bytesize > 0)
+        current_instance, vec = type_param.send(:new_and_rest, vec)
+        value << current_instance
+      end
+    when :optional
+      presence = buf.byteslice(0, 1).unpack1('C')
+      case presence
+      when 0
+        value = nil
+        buf = buf.byteslice(1..)
+      when 1
+        # as of RFC 9420, optional always takes a class
+        value, buf = elem[2].send(:new_and_rest, buf)
+      end
+    when :opaque
+      value = buf.byteslice(0, type_param.to_i)
+      buf = buf.byteslice((type_param.to_i)..)
+    end
+    [value, buf]
+  end
+
+  # take a name and type
+  def serialize_elem(value, type)
+    case type
+    when :uint8
+      [value].pack('C')
+    when :uint16
+      [value].pack('S>')
+    when :uint32
+      [value].pack('L>')
+    when :uint64
+      [value].pack('Q>')
+    when :vec
+      value.to_vec
+    when :vecs
+      value.map(&:to_vec).join.to_vec
+    when :class
+      value.raw
+    when :classes
+      value.map(&:raw).join.to_vec
+    when :optional
+      if value.nil?
+        [0].pack('C')
+      else
+        # as of RFC 9420, optional always takes a class
+        [1].pack('C') + value.raw
+      end
+    when :opaque
+      value
     end
   end
 end
