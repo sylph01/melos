@@ -53,3 +53,7 @@ message_vector = message_vectors.first
 commit = MLSStruct::Commit.new(from_hex(message_vector["commit"]))
 assert_equal to_hex(commit.raw), message_vector["commit"]
 puts "commit"
+
+group_secrets = MLSStruct::GroupSecrets.new(from_hex(message_vector["group_secrets"]))
+assert_equal to_hex(group_secrets.raw), message_vector["group_secrets"]
+puts "group_secrets"
