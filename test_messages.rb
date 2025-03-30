@@ -16,9 +16,9 @@ def to_hex(bin)
   bin.unpack1('H*')
 end
 
-message_vectors = JSON.parse(File.read('test_vectors/messages.json'))
+message_vectors = JSON.parse(File.read('test_vectors/messages.json'))[0..0]
 
-message_vector = message_vectors[0]
+message_vectors.each do |message_vector|
 
 add_proposal = MLSStruct::Add.new(from_hex(message_vector["add_proposal"]))
 assert_equal to_hex(add_proposal.raw), message_vector["add_proposal"]
@@ -48,8 +48,6 @@ group_context_extensions_proposal = MLSStruct::GroupContextExtensions.new(from_h
 assert_equal to_hex(group_context_extensions_proposal.raw), message_vector["group_context_extensions_proposal"]
 puts "[s] group_context_extensions_proposal"
 
-puts
-
 commit = MLSStruct::Commit.new(from_hex(message_vector["commit"]))
 assert_equal to_hex(commit.raw), message_vector["commit"]
 puts "[s] commit"
@@ -73,3 +71,4 @@ puts "[s] mls_key_package"
 # public_message_application = MLSStruct::PublicMessage.new(from_hex(message_vector["public_message_application"]))
 # assert_equal to_hex(public_message_application.raw), message_vector["public_message_application"]
 # puts "[s] public_message_application"
+end
