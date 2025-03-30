@@ -952,6 +952,15 @@ class MLSStruct::PreSharedKeyID < MLSStruct::Base
   end
 end
 
+class MLSStruct::PSKLabel < MLSStruct::Base
+  attr_reader :id, :index, :count
+  STRUCT = [
+    [:id, :class, MLSStruct::PreSharedKeyID],
+    [:index, :uint16],
+    [:count, :uint16]
+  ]
+end
+
 # 12.4.3.1
 
 class MLSStruct::PathSecret < MLSStruct::Base
