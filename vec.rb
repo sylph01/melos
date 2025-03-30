@@ -665,41 +665,6 @@ end
 
 ## NodeType: uint8 enum
 
-class MLSStruct::TreeHashInput < MLSStruct::Base
-  attr_reader :node_type, :leaf_node, :parent_node
-  STRUCT = [
-    [:node_type, :uint8],
-    [:select_node_type, :custom]
-  ]
-
-  private
-  def deserialize_select_node_type(buf, context)
-    returns = []
-    case context[:node_type]
-    when 0x01 # key_package
-      leaf_node, buf = MLSStruct::LeafNodeHashInput.new_and_rest(buf)
-      returns << [:leaf_node, leaf_node]
-    when 0x02 # update
-      parent_node, buf = MLSStruct::ParentNodeHashInput.new_and_rest(buf)
-      returns << [:parent_node, parent_node]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_node_type
-    case @node_type
-    when 0x01
-      @leaf_node.raw
-    when 0x02
-      @parent_node.raw
-    else
-      ''
-    end
-  end
-end
-
 class MLSStruct::LeafNodeHashInput < MLSStruct::Base
   attr_reader :leaf_index, :leaf_node
   STRUCT = [
@@ -725,6 +690,15 @@ class MLSStruct::ParentHashInput < MLSStruct::Base
     [:encryption_key, :vec], # HPKEPublicKey
     [:parent_hash, :vec],
     [:original_sibling_tree_hash, :vec]
+  ]
+end
+
+class MLSStruct::TreeHashInput < MLSStruct::Base
+  attr_reader :node_type, :leaf_node, :parent_node
+  STRUCT = [
+    [:node_type, :uint8],
+    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLSStruct::LeafNodeHashInput],   # key_package
+    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLSStruct::ParentNodeHashInput], # update
   ]
 end
 
@@ -772,45 +746,17 @@ class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base
   ]
 end
 
-## 8.3
+## 8.4
 
 class MLSStruct::PreSharedKeyID < MLSStruct::Base
   attr_reader :psktype, :psk_id, :psk_group_id, :psk_epoch, :psk_nonce
   STRUCT = [
     [:psktype, :uint8],
-    [:select_psktype, :custom],
+    [:psk_id,       :select, ->(ctx){ctx[:psktype] == 0x01}, :vec],    # external
+    [:psk_group_id, :select, ->(ctx){ctx[:psktype] == 0x02}, :vec],    # resumption
+    [:psk_epoch,    :select, ->(ctx){ctx[:psktype] == 0x02}, :uint64], # resumption
     [:psk_nonce, :vec]
   ]
-
-  private
-  def deserialize_select_psktype(buf, context)
-    returns = []
-    case context[:psktype]
-    when 0x01 # key_package
-      psk_id, buf = String.parse_vec(buf)
-      returns << [:psk_id, psk_id]
-    when 0x02 # update
-      psk_group_id, buf = String.parse_vec(buf)
-      psk_epoch = buf.byteslice(0, 8).unpack1('Q>') # uint64
-      buf = buf.byteslice(8..)
-      returns << [:psk_group_id, psk_group_id]
-      returns << [:psk_epoch, psk_epoch]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_psktype
-    case @psktype
-    when 0x01
-      @psk_id.to_vec
-    when 0x02
-      @psk_group_id.to_vec + [@psk_epoch].pack('Q>')
-    else
-      ''
-    end
-  end
 end
 
 class MLSStruct::PSKLabel < MLSStruct::Base
