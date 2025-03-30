@@ -484,7 +484,7 @@ class MLSStruct::EncryptedGroupSecrets < MLSStruct::Base
   attr_reader :new_member, :encrypted_group_secrets
   STRUCT = [
     [:new_member, :vec], # KeyPackageRef = opaque <V>
-    [:encrypted_group_secrets, :vec] # HPKECipherText = opaque <V>
+    [:encrypted_group_secrets, :class, MLSStruct::HPKECipherText]
   ]
 end
 
