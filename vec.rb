@@ -445,35 +445,66 @@ class MLSStruct::FramedContentTBS < MLSStruct::Base
   end
 end
 
-class MLSStruct::FramedContentAuthData
-  # construct from FramedContent instead of raw binary
-  def initialize(wire_format, framed_content)
-    data_to_be_signed = [[0x01].pack('S>'), [wire_format].pack('S>'), framed_content.raw].join
-    @framed_content_tbs = MLSStruct::FramedContentTBS.new(data_to_be_signed) # when creating this, we might need group context too
+class MLSStruct::FramedContentAuthData < MLSStruct::Base
+  attr_accessor :content_type
+  attr_reader :signature, :confirmation_tag
+  STRUCT = [
+    [:signature, :vec], # SignWithLabel(., "FramedContentTBS", FramedContentTBS)
+    [:select_content_type, :custom]
+  ]
 
-    @signature = @framed_content_tbs.raw # will use cipher suite later to sign
-    case framed_content.content_type
-    when 0x03
-      # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
-      # where do these two values come from?
-      @confirmation_tag = @framed_content_tbs.group_context.confirmed_transcript_hash
-    when 0x01, 0x02
-      # empty struct, thus do nothing
+  private
+  def deserialize_select_content_type(buf, context)
+    returns = []
+    case @content_type
+    when 0x03 # commit
+      mac, buf = String.parse_vec(buf) # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+      returns << [:confirmation_tag, mac]
     else
+      # add nothing
     end
+    [returns, buf]
   end
 
-  def raw
-    case framed_content.content_type
-    when 0x03
-      @signature.to_vec + @confirmation_tag.to_vec
-    when 0x01, 0x02
-      @signature.to_vec
+  def serialize_select_content_type
+    case @content_type
+    when 0x03 # commit
+      @confirmation_tag.to_vec
     else
       ''
     end
   end
 end
+
+# class MLSStruct::FramedContentAuthData
+#   # construct from FramedContent instead of raw binary
+#   def initialize(wire_format, framed_content)
+#     data_to_be_signed = [[0x01].pack('S>'), [wire_format].pack('S>'), framed_content.raw].join
+#     @framed_content_tbs = MLSStruct::FramedContentTBS.new(data_to_be_signed) # when creating this, we might need group context too
+
+#     @signature = @framed_content_tbs.raw # will use cipher suite later to sign
+#     case framed_content.content_type
+#     when 0x03
+#       # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+#       # where do these two values come from?
+#       @confirmation_tag = @framed_content_tbs.group_context.confirmed_transcript_hash
+#     when 0x01, 0x02
+#       # empty struct, thus do nothing
+#     else
+#     end
+#   end
+
+#   def raw
+#     case framed_content.content_type
+#     when 0x03
+#       @signature.to_vec + @confirmation_tag.to_vec
+#     when 0x01, 0x02
+#       @signature.to_vec
+#     else
+#       ''
+#     end
+#   end
+# end
 
 
 class MLSStruct::AuthenticatedContent
