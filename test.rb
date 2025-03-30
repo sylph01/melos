@@ -14,13 +14,6 @@ u32 = [65536].pack('L>')
 
 str_vec = ('vec' * 30).to_vec
 
-hg = MLSStruct::Hoge.new(str_vec)
-assert_equal hg.raw, str_vec
-
-hg, hg_rest = MLSStruct::Hoge.new_and_rest(str_vec)
-
-puts 'Hoge'
-
 enc_label = 'label'.to_vec
 enc_context = ('context' * 30).to_vec
 enc_str = enc_label + enc_context
@@ -42,13 +35,6 @@ cred2 = MLSStruct::Credential.new(cred2_content)
 assert_equal cred2.raw , cred2_content
 
 puts 'Credential'
-
-kl = MLSStruct::Klass.new(str_vec + str_vec)
-assert_equal kl.raw, str_vec + str_vec
-
-kls_raw = ['foo', 'bar', 'baz', 'qux', 'quux'].map(&:to_vec).join.to_vec
-kls = MLSStruct::Klasses.new(kls_raw)
-assert_equal kls.raw, kls_raw
 
 # basic sender
 sender1_type = [1].pack('C')
