@@ -252,48 +252,9 @@ class MLSStruct::Credential < MLSStruct::Base
   attr_reader :credential_type, :identity, :certificates
   STRUCT = [
     [:credential_type, :uint16],
-    [:credential_body, :custom]
+    [:identity,     :select, ->(ctx){ctx[:credential_type] == 0x0001}, :vec], # 0x0001 = basic
+    [:certificates, :select, ->(ctx){ctx[:credential_type] == 0x0002}, :classes, MLSStruct::Certificate] #0x0002 = x509
   ]
-
-  private
-  def deserialize_credential_body(buf, context)
-    # cf. Section 17.5
-    returns = []
-    case context[:credential_type]
-    when 0x0000
-      # RESERVED
-      raise ArgumentError.new('invalid credential type')
-    when 0x0001
-      # basic
-      value, _ = String.parse_vec(buf)
-      returns << [:identity, value]
-    when 0x0002
-      certificates = []
-      # try parsing until buffer is blank
-      value, _ = String.parse_vec(buf)
-      while (value.bytesize > 0)
-        current_vec, value = String.get_first_vec(value)
-        certificates << MLSStruct::Certificate.new(current_vec)
-      end
-      returns << [:certificates, certificates]
-    else
-      # some values might be used for GREASE so just pass through
-    end
-    # this is the end of struct
-    [returns, nil]
-  end
-
-  def serialize_credential_body
-    case @credential_type
-    when 0x0001
-      @identity.to_vec
-    when 0x0002
-      @certificates.map(&:raw).reduce(&:+).to_vec
-    else
-      # should not happen?
-      ''
-    end
-  end
 end
 
 # Section 6.1
@@ -301,47 +262,9 @@ class MLSStruct::Sender < MLSStruct::Base
   attr_reader :sender_type, :leaf_index, :sender_index
   STRUCT = [
     [:sender_type, :uint8],
-    [:sender_content, :custom],
+    [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == 0x01}, :uint32], # 0x01 = member
+    [:sender_index, :select, ->(ctx){ctx[:sender_type] == 0x02}, :uint32], # 0x02 = external
   ]
-
-  private
-  def deserialize_sender_content(buf, context)
-    returns = []
-    case context[:sender_type]
-    when 0x01
-      # member
-      value = buf.byteslice(0, 4).unpack1('L>')
-      buf = buf.byteslice(4..)
-      returns << [:leaf_index, value]
-    when 0x02
-      # external
-      value = buf.byteslice(0, 4).unpack1('L>')
-      buf = buf.byteslice(4..)
-      returns << [:sender_index, value]
-    when 0x03, 0x04
-      # new_member_proposal, new_member_commit
-    else
-      # reserved, other
-    end
-    [returns, buf]
-  end
-
-  def serialize_sender_content
-    case @sender_type
-    when 0x01
-      # member
-      [@leaf_index].pack('L>')
-    when 0x02
-      # external
-      [@sender_index].pack('L>')
-    when 0x03, 0x04
-      # new_member_proposal, new_member_commit
-      ''
-    else
-      # reserved, other
-      ''
-    end
-  end
 end
 
 class MLSStruct::FramedContent < MLSStruct::Base
@@ -352,7 +275,7 @@ class MLSStruct::FramedContent < MLSStruct::Base
     [:sender, :class, MLSStruct::Sender],
     [:authenticated_data, :vec],
     [:content_type, :uint8],
-    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec]
+    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec],
     #[:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
     #[:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
   ]
@@ -363,47 +286,12 @@ class MLSStruct::MLSMessage < MLSStruct::Base
   STRUCT = [
     [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
-    [:select_wire_format, :custom]
+    # [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, MLSStruct::PublicMessage],
+    # [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, MLSStruct::PrivateMessage],
+    # [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, MLSStruct::Welcome],
+    # [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLSStruct::GroupInfo],
+    # [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLSStruct::KeyPackage]
   ]
-
-  private
-  def deserialize_select_wire_format(buf, context)
-    returns = []
-    case context[:wire_format]
-    when 0x0001 # public_message
-      public_message, buf = MLSStruct::PublicMessage.new_and_rest(buf)
-      returns << [:public_message, public_message]
-    when 0x0002 # private_message
-      private_message, buf = MLSStruct::PrivateMessage.new_and_rest(buf)
-      returns << [:private_message, private_message]
-    when 0x0003 # welcome
-      welcome, buf = MLSStruct::Welcome.new_and_rest(buf)
-      returns << [:welcome, welcome]
-    when 0x0004 # mls_group_info
-      group_info, buf = MLSStruct::GroupInfo.new_and_rest(buf)
-      returns << [:group_info, group_info]
-    when 0x0005 # mls_key_package
-      key_package, buf = MLSStruct::KeyPackage.new_and_rest(buf)
-      returns << [:key_package, key_package]
-    else
-    end
-  end
-
-  def serialize_select_wire_format
-    case @wire_format
-    when 0x0001
-      @public_message.raw
-    when 0x0002
-      @private_message.raw
-    when 0x0003
-      @welcome.raw
-    when 0x0004
-      @group_info.raw
-    when 0x0005
-      @key_package.raw
-    else
-    end
-  end
 end
 
 class MLSStruct::FramedContentTBS < MLSStruct::Base

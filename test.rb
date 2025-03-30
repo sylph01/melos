@@ -19,11 +19,15 @@ assert_equal hg.raw, str_vec
 
 hg, hg_rest = MLSStruct::Hoge.new_and_rest(str_vec)
 
+puts 'Hoge'
+
 enc_label = 'label'.to_vec
 enc_context = ('context' * 30).to_vec
 enc_str = enc_label + enc_context
 enc_ctx = MLSStruct::EncryptContext.new(enc_str)
 assert_equal enc_ctx.raw, enc_str
+
+puts 'EncryptContext'
 
 cred1_type = [1].pack('S>')
 cred1_ident = '[]dentity'.to_vec
@@ -36,6 +40,8 @@ cred2_certs = ['cert1', 'cert2cert2', 'cert3cert3cert3'].map(&:to_vec).join.to_v
 cred2_content = cred2_type + cred2_certs
 cred2 = MLSStruct::Credential.new(cred2_content)
 assert_equal cred2.raw , cred2_content
+
+puts 'Credential'
 
 kl = MLSStruct::Klass.new(str_vec + str_vec)
 assert_equal kl.raw, str_vec + str_vec
@@ -50,6 +56,8 @@ sender1_leaf_index = [1].pack('L>')
 sender1_body = sender1_type + sender1_leaf_index
 sender1 = MLSStruct::Sender.new(sender1_body)
 assert_equal sender1.raw, sender1_body
+
+puts 'Sender'
 
 # basic framed content
 bfc1_group_ids = 'groupid1'.to_vec
