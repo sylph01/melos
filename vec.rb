@@ -587,6 +587,188 @@ class MLSStruct::SenderDataAAD < MLSStruct::Base
   ]
 end
 
+## 7.1
+
+class MLSStruct::ParentNode < MLSStruct::Base
+  attr_reader :encryption_key, :parent_hash, :unmerged_leaves
+  STRUCT = [
+    [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
+    [:parent_hash, :vec],
+    [:unmerged_leaves, :vec] # becomes a vec of uint32
+  ]
+end
+
+## 7.2
+
+class MLSStruct::Capabilities < MLSStruct::Base
+  attr_reader :versions, :cipher_suites, :extensions, :proposals, :credentials
+  STRUCT = [
+    [:versions, :vec],      # vec of ProtocolVersion (uint16)
+    [:cipher_suites, :vec], # vec of CipherSuite (uint16)
+    [:extensions, :vec],    # vec of ExtensionType (uint16)
+    [:proposals, :vec],     # vec of ProposalTypes (uint16)
+    [:credentials, :vec]    # vec of CredentialTypes (uint16)
+  ]
+end
+
+class MLSStruct::Lifetime < MLSStruct::Base
+  attr_reader :not_before, :not_after
+  STRUCT = [
+    [:not_before, :uint64],
+    [:not_after, :uint64]
+  ]
+end
+
+class MLSStruct::Extension < MLSStruct::Base
+  attr_reader :extension_type, :extension_data
+  STRUCT = [
+    [:extension_type, :uint16], # ExtensionType = uint16
+    [:extension_data, :vec]
+  ]
+end
+
+class MLSStruct::LeafNode < MLSStruct::Base
+  attr_reader :encryption_key, :signature_key, :credential, :capabilities, :leaf_node_source, :lifetime, :parent_hash, :extensions, :signature
+  STRUCT = [
+    [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
+    [:signature_key, :vec],  # SignaturePublicKey = opaque <V>
+    [:credential, :class, MLSStruct::Credential],
+    [:capabilities, :class, MLSStruct::Capabilities],
+    [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
+    [:select_leaf_node_source, :custom],
+    [:extensions, :classes, MLSStruct::Extension],
+    [:signature, :vec]
+  ]
+
+  private
+  def deserialize_select_leaf_node_source(buf, context)
+    returns = []
+    case context[:leaf_node_source]
+    when 0x01 # key_package
+      lifetime, buf = MLSStruct::Lifetime.new_and_rest(buf)
+      returns << [:lifetime, lifetime]
+    when 0x02 # update
+      # add an empty struct, aka nothing
+    when 0x03 # commit
+      parent_hash, buf = String.parse_vec(buf)
+      returns << [:parent_hash, parent_hash]
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_leaf_node_source
+    case @leaf_node_source
+    when 0x01
+      @lifetime.raw
+    when 0x02, 0x03, 0x04
+      ''
+    else
+      @parent_hash.to_vec
+    end
+  end
+end
+
+class MLSStruct::LeafNodeTBS < MLSStruct::Base
+  attr_reader :encryption_key, :signature_key, :credential, :capabilities, :leaf_node_source, :lifetime, :parent_hash, :extensions, :group_id, :leaf_index
+  STRUCT = [
+    [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
+    [:signature_key, :vec],  # SignaturePublicKey = opaque <V>
+    [:credential, :class, MLSStruct::Credential],
+    [:capabilities, :class, MLSStruct::Capabilities],
+    [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
+    [:select_leaf_node_source, :custom],
+    [:extensions, :vec],
+    [:select_leaf_node_source_2, :custom]
+  ]
+
+  private
+  def deserialize_select_leaf_node_source(buf, context)
+    returns = []
+    case context[:leaf_node_source]
+    when 0x01 # key_package
+      lifetime, buf = MLSStruct::Lifetime.new_and_rest(buf)
+      returns << [:lifetime, lifetime]
+    when 0x02 # update
+      # add an empty struct, aka nothing
+    when 0x03 # commit
+      parent_hash, buf = String.parse_vec(buf)
+      returns << [:parent_hash, parent_hash]
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def deserialize_select_leaf_node_source_2(buf, context)
+    returns = []
+    case context[:leaf_node_source]
+    when 0x01 # key_package
+      # add an empty struct, aka nothing
+    when 0x02, 0x03 # update, commit
+      group_id, buf = String.parse_vec(buf)
+      returns << [:group_id, group_id]
+      leaf_index = buf.byteslice(0, 4).unpack1('L>') # uint32
+      buf = buf.byteslice(4..)
+      returns << [:leaf_index, leaf_index]
+    else
+      # add nothing
+    end
+    [returns, buf]
+  end
+
+  def serialize_select_leaf_node_source
+    case @leaf_node_source
+    when 0x01
+      @lifetime.raw
+    when 0x02
+      ''
+    when 0x03
+      @parent_hash.to_vec
+    else
+      ''
+    end
+  end
+
+  def serialize_select_leaf_node_source_2
+    case @leaf_node_source
+    when 0x01
+      ''
+    when 0x02, 0x03
+      @group_id.to_vec + @leaf_index.pack('L>')
+    else
+      ''
+    end
+  end
+end
+
+## 7.6
+
+class MLSStruct::HPKECipherText < MLSStruct::Base
+  attr_reader :kem_output, :ciphertext
+  STRUCT = [
+    [:kem_output, :vec],
+    [:ciphertext, :vec]
+  ]
+end
+
+class MLSStruct::UpdatePathNode < MLSStruct::Base
+  attr_reader :encryption_key, :encrypted_path_secret
+  STRUCT = [
+    [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
+    [:encrypted_path_secret, :classes, MLSStruct::HPKECipherText]
+  ]
+end
+
+class MLSStruct::UpdatePath < MLSStruct::Base
+  attr_reader :leaf_node, :nodes
+  STRUCT = [
+    [:leaf_node, :class, MLSStruct::LeafNode],
+    [:nodes, :classes, MLSStruct::UpdatePathNode]
+  ]
+end
+
 # 12.4.3.1
 
 class MLSStruct::PathSecret < MLSStruct::Base
