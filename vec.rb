@@ -392,34 +392,8 @@ class MLSStruct::PublicMessage < MLSStruct::Base
   STRUCT = [
     [:content, :class, MLSStruct::FramedContent],
     [:auth, :class, MLSStruct::FramedContentAuthData],
-    [:select_sender_type, :custom]
+    [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
-
-  private
-  def deserialize_select_sender_type(buf, context)
-    returns = []
-    case context[:content].sender.sender_type
-    when 0x01 #member
-      mac, buf = String.parse_vec(buf) # MAC is opaque <V>
-      returns << [:membership_tag, mac]
-    when 0x02, 0x03, 0x04 #external, new_member_proposal, new_member_commit
-      # add an empty struct, aka nothing
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_sender_type
-    case @content.sender.sender_type
-    when 0x01
-      @membership_tag.to_vec
-    when 0x02, 0x03, 0x04
-      ''
-    else
-      ''
-    end
-  end
 end
 
 class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
@@ -527,39 +501,12 @@ class MLSStruct::LeafNode < MLSStruct::Base
     [:credential, :class, MLSStruct::Credential],
     [:capabilities, :class, MLSStruct::Capabilities],
     [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
+    [:lifetime, :select,    ->(ctx){ctx[:leaf_node_source] == 0x01}, :class, MLSStruct::Lifetime], # key_package
+    [:parent_hash, :select, ->(ctx){ctx[:leaf_node_source] == 0x03}, :vec],                        # commit
     [:select_leaf_node_source, :custom],
     [:extensions, :classes, MLSStruct::Extension],
     [:signature, :vec]
   ]
-
-  private
-  def deserialize_select_leaf_node_source(buf, context)
-    returns = []
-    case context[:leaf_node_source]
-    when 0x01 # key_package
-      lifetime, buf = MLSStruct::Lifetime.new_and_rest(buf)
-      returns << [:lifetime, lifetime]
-    when 0x02 # update
-      # add an empty struct, aka nothing
-    when 0x03 # commit
-      parent_hash, buf = String.parse_vec(buf)
-      returns << [:parent_hash, parent_hash]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_leaf_node_source
-    case @leaf_node_source
-    when 0x01
-      @lifetime.raw
-    when 0x02, 0x03, 0x04
-      ''
-    else
-      @parent_hash.to_vec
-    end
-  end
 end
 
 class MLSStruct::LeafNodeTBS < MLSStruct::Base
