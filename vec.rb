@@ -171,7 +171,7 @@ class MLSStruct::Base
         case presence
         when 0
           value = nil
-          buf.byteslice(1..)
+          buf = buf.byteslice(1..)
         when 1
           # as of RFC 9420, optional always takes a class
           value, buf = elem[2].send(:new_and_rest, buf)
