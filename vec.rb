@@ -300,66 +300,42 @@ class MLSStruct::FramedContentTBS < MLSStruct::Base
     [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
     [:content, :class, MLSStruct::FramedContent],
-    [:select_sender_type, :custom]
+    # [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, MLSStruct::GroupContext]
   ]
-
-  private
-  def deserialize_select_sender_type(buf, context)
-    returns = []
-    case context[:content].sender.sender_type
-    when 0x01, 0x04 #member, new_member_commit
-      group_context, buf = MLSStruct::GroupContext.new_and_rest(buf)
-      returns << [:context, group_context]
-    when 0x02, 0x03 #external, new_member_proposal
-      # add an empty struct, aka nothing
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_sender_type
-    case @content.sender.sender_type
-    when 0x01, 0x04
-      @context.raw
-    when 0x02, 0x03
-      ''
-    else
-      ''
-    end
-  end
 end
 
-class MLSStruct::FramedContentAuthData < MLSStruct::Base
-  attr_accessor :content_type
-  attr_reader :signature, :confirmation_tag
-  STRUCT = [
-    [:signature, :vec], # SignWithLabel(., "FramedContentTBS", FramedContentTBS)
-    [:select_content_type, :custom]
-  ]
+class MLSStruct::FramedContentAuthData; end
 
-  private
-  def deserialize_select_content_type(buf, context)
-    returns = []
-    case @content_type
-    when 0x03 # commit
-      mac, buf = String.parse_vec(buf) # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
-      returns << [:confirmation_tag, mac]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
+# class MLSStruct::FramedContentAuthData < MLSStruct::Base
+#   attr_accessor :content_type
+#   attr_reader :signature, :confirmation_tag
+#   STRUCT = [
+#     [:signature, :vec], # SignWithLabel(., "FramedContentTBS", FramedContentTBS)
+#     [:select_content_type, :custom]
+#   ]
 
-  def serialize_select_content_type
-    case @content_type
-    when 0x03 # commit
-      @confirmation_tag.to_vec
-    else
-      ''
-    end
-  end
-end
+#   private
+#   def deserialize_select_content_type(buf, context)
+#     returns = []
+#     case @content_type
+#     when 0x03 # commit
+#       mac, buf = String.parse_vec(buf) # MAC(confirmation_key, GroupContext.confirmed_transcript_hash)
+#       returns << [:confirmation_tag, mac]
+#     else
+#       # add nothing
+#     end
+#     [returns, buf]
+#   end
+
+#   def serialize_select_content_type
+#     case @content_type
+#     when 0x03 # commit
+#       @confirmation_tag.to_vec
+#     else
+#       ''
+#     end
+#   end
+# end
 
 # class MLSStruct::FramedContentAuthData
 #   # construct from FramedContent instead of raw binary
