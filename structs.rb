@@ -586,6 +586,37 @@ end
 #   end
 # end
 
+class MLSStruct::FramedContentAuthData < MLSStruct::Base
+  attr_reader :signature, :confirmation_tag, :content_type
+
+  STRUCT = [
+    [:signature, :vec]
+  ]
+
+  # initialize from stream
+  def self.new_and_rest_with_content_type(buf, content_type)
+    instance = self.allocate
+    context, buf = instance.send(:deserialize, buf)
+    # custom part based on instance variable
+    if content_type == 0x03 # commit
+      # read MAC(opaque <V>) confirmation_tag
+      value, buf = String.parse_vec(buf)
+      context << [:confirmation_tag, value]
+    end
+    context << [:content_type, content_type]
+    instance.send(:set_instance_vars, context)
+    [instance, buf]
+  end
+
+  def raw
+    if @content_type == 0x03
+      @signature.to_vec + @confirmation_tag.to_vec
+    else
+      @signature.to_vec
+    end
+  end
+end
+
 class MLSStruct::FramedContent < MLSStruct::Base
   attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
   STRUCT = [
@@ -610,8 +641,6 @@ class MLSStruct::FramedContentTBS < MLSStruct::Base
   ]
 end
 
-class MLSStruct::FramedContentAuthData; end
-
 class MLSStruct::AuthenticatedContent
   # construct from WireFormat and FramedContent
   def initialize(wire_format, framed_content)
@@ -635,7 +664,7 @@ class MLSStruct::PublicMessage < MLSStruct::Base
   attr_reader :content, :auth, :membership_tag
   STRUCT = [
     [:content, :class, MLSStruct::FramedContent],
-    [:auth, :class, MLSStruct::FramedContentAuthData],
+    [:auth, :framed_content_auth_data],
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
 end

@@ -72,7 +72,15 @@ private_message = MLSStruct::MLSMessage.new(from_hex(message_vector["private_mes
 assert_equal to_hex(private_message.raw), message_vector["private_message"]
 puts "[s] private_message"
 
-# public_message_application = MLSStruct::PublicMessage.new(from_hex(message_vector["public_message_application"]))
-# assert_equal to_hex(public_message_application.raw), message_vector["public_message_application"]
-# puts "[s] public_message_application"
+public_message_application = MLSStruct::MLSMessage.new(from_hex(message_vector["public_message_application"]))
+assert_equal to_hex(public_message_application.raw), message_vector["public_message_application"]
+puts "[s] public_message_application"
+
+public_message_proposal = MLSStruct::MLSMessage.new(from_hex(message_vector["public_message_proposal"]))
+assert_equal to_hex(public_message_proposal.raw), message_vector["public_message_proposal"]
+puts "[s] public_message_proposal"
+
+public_message_commit = MLSStruct::MLSMessage.new(from_hex(message_vector["public_message_commit"]))
+assert_equal to_hex(public_message_commit.raw), message_vector["public_message_commit"]
+puts "[s] public_message_commit"
 end

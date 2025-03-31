@@ -59,6 +59,9 @@ class MLSStruct::Base
       when :select
         value, buf = deserialize_select_elem_with_context(buf, context.to_h, elem[2], elem[3], elem[4])
         context << [elem[0], value]
+      when :framed_content_auth_data
+        value, buf = MLSStruct::FramedContentAuthData.new_and_rest_with_content_type(buf, context.to_h[:content].content_type)
+        context << [elem[0], value]
       else
         value, buf = deserialize_elem(buf, elem[1], elem[2])
         context << [elem[0], value]
@@ -134,7 +137,7 @@ class MLSStruct::Base
       value.to_vec
     when :vecs
       value.map(&:to_vec).join.to_vec
-    when :class
+    when :class, :framed_content_auth_data
       value.raw
     when :classes
       value.map(&:raw).join.to_vec
