@@ -273,6 +273,18 @@ class MLSStruct::GroupContext < MLSStruct::Base
     [:confirmed_transcript_hash, :vec],
     [:extensions, :classes, MLSStruct::Extension]
   ]
+
+  def self.create(cipher_suite:, group_id:, epoch:, tree_hash:, confirmed_transcript_hash:, extensions:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, 1)
+    new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
+    new_instance.instance_variable_set(:@group_id, group_id)
+    new_instance.instance_variable_set(:@epoch, epoch)
+    new_instance.instance_variable_set(:@tree_hash, tree_hash)
+    new_instance.instance_variable_set(:@confirmed_transcript_hash, confirmed_transcript_hash)
+    new_instance.instance_variable_set(:@extensions, extensions)
+    new_instance
+  end
 end
 
 ## 8.4

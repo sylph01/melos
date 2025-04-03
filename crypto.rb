@@ -9,6 +9,10 @@ class MLS::Crypto
   KDF = HPKE::HKDF.new(:sha256)
   HPKE = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
 
+  def self.zero_vector(length)
+    ([0] * length).pack('C*')
+  end
+
   def self.ref_hash(label, value)
     ref_hash_input = label.to_vec + value.to_vec
     DIGEST.digest(ref_hash_input)
@@ -20,6 +24,14 @@ class MLS::Crypto
 
   def self.make_proposal_ref(value)
     self.ref_hash("MLS 1.0 Proposal Reference", value)
+  end
+
+  def self.kdf_extract(salt, ikm)
+    KDF.extract(salt, ikm)
+  end
+
+  def self.kdf_n_h
+    KDF.n_h
   end
 
   def self.expand_with_label(secret, label, context, length)
