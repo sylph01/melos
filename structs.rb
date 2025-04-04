@@ -596,6 +596,16 @@ class MLSStruct::FramedContent < MLSStruct::Base
     [:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
     [:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
   ]
+
+  def content_tbs(version, wire_format, group_context)
+    buf = [version].pack('S>') + [wire_format].pack('S>') + self.raw
+    case sender.sender_type
+    when 0x01, 0x04 # member, new_member_commit
+      buf += group_context.raw
+    when 0x02, 0x03 # external, new_member_proposal
+      # do nothing
+    end
+  end
 end
 
 class MLSStruct::FramedContentTBS < MLSStruct::Base
@@ -608,20 +618,24 @@ class MLSStruct::FramedContentTBS < MLSStruct::Base
   ]
 end
 
-class MLSStruct::AuthenticatedContent
-  # construct from WireFormat and FramedContent
-  def initialize(wire_format, framed_content)
-    @wire_format = wire_format
-    @content = framed_content
-    @auth = MLSStruct::FramedContentAuthData.new(wire_format, framed_content)
+class MLSStruct::AuthenticatedContent < MLSStruct::Base
+  attr_reader :wire_format, :content, :auth
+  STRUCT = [
+    [:wire_format, :uint16],
+    [:content, :class, MLSStruct::FramedContent],
+    [:auth, :framed_content_auth_data]
+  ]
+
+  def content_tbm
+    content.content_tbs(0x01, wire_format) + auth.raw
   end
 
-  def raw
-    [
-      [@wire_format].pack('S>'),
-      @content.raw,
-      @auth.raw
-    ].join
+  def confirmed_transcript_hash_input
+    MLSStruct::ConfirmedTranscriptHashInput.create(
+      wire_format: wire_format,
+      content: content,
+      signature: auth.signature
+    )
   end
 end
 
@@ -675,13 +689,21 @@ end
 
 ## 8.2
 
-class MLSStruct::ConfirmedTranscriptHash < MLSStruct::Base
-  attr_reader :wire_format, :content, :signature
+class MLSStruct::ConfirmedTranscriptHashInput < MLSStruct::Base
+  attr_accessor :wire_format, :content, :signature
   STRUCT = [
     [:wire_format, :uint16],
     [:content, :class, MLSStruct::FramedContent], # with content_type == commit
     [:signature, :vec]
   ]
+
+  def self.create(wire_format:, content:, signature:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@wire_format, wire_format)
+    new_instance.instance_variable_set(:@content, content)
+    new_instance.instance_variable_set(:@signature, signature)
+    new_instance
+  end
 end
 
 class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base

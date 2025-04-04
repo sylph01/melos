@@ -6,6 +6,7 @@ module MLS; end
 
 class MLS::Crypto
   DIGEST = OpenSSL::Digest::SHA256
+  DIGEST_INSTANCE = OpenSSL::Digest.new('sha256')
   KDF = HPKE::HKDF.new(:sha256)
   HPKE = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
 
@@ -83,5 +84,13 @@ class MLS::Crypto
     vkey = OpenSSL::PKey.new_raw_public_key("ED25519", verification_key)
     sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
     vkey.verify(nil, signature_value, sign_content)
+  end
+
+  def self.mac(key, data)
+    OpenSSL::HMAC.digest(DIGEST_INSTANCE, key, data)
+  end
+
+  def self.hash(data)
+    DIGEST.digest(data)
   end
 end
