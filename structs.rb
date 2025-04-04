@@ -298,6 +298,14 @@ class MLSStruct::PreSharedKeyID < MLSStruct::Base
     [:psk_epoch,    :select, ->(ctx){ctx[:psktype] == 0x02}, :uint64], # resumption
     [:psk_nonce, :vec]
   ]
+
+  def self.create_external(psk_id:, psk_nonce:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@psktype, 0x01)
+    new_instance.instance_variable_set(:@psk_id, psk_id)
+    new_instance.instance_variable_set(:@psk_nonce, psk_nonce)
+    new_instance
+  end
 end
 
 class MLSStruct::PSKLabel < MLSStruct::Base
@@ -307,6 +315,14 @@ class MLSStruct::PSKLabel < MLSStruct::Base
     [:index, :uint16],
     [:count, :uint16]
   ]
+
+  def self.create(id:, index:, count:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@id, id)
+    new_instance.instance_variable_set(:@index, index)
+    new_instance.instance_variable_set(:@count, count)
+    new_instance
+  end
 end
 
 ## 10
