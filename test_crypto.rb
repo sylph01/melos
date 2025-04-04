@@ -11,8 +11,9 @@ self.assertions = 0
 
 crypto_vectors = JSON.parse(File.read('test_vectors/crypto-basics.json'))
 
-crypto_vectors[0..0].each_with_index do |vector, index|
+crypto_vectors[0..1].each_with_index do |vector, index|
   suite = MLS::Crypto::CipherSuite.new(vector['cipher_suite'])
+  puts "for cipher suite ID #{vector['cipher_suite']}:"
 
   # RefHash
   ref_hash = MLS::Crypto.ref_hash(suite, vector['ref_hash']['label'], from_hex(vector['ref_hash']['value']))

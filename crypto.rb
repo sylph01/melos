@@ -6,13 +6,76 @@ module MLS; end
 
 class MLS::Crypto
   class CipherSuite
-    attr_accessor :digest, :hpke, :kdf
+    module X25519
+      def self.deserialize_public_encapsulation_key(raw)
+        OpenSSL::PKey.new_raw_public_key('X25519', raw)
+      end
+
+      def self.deserialize_private_encapsulation_key(raw)
+        OpenSSL::PKey.new_raw_private_key('X25519', raw)
+      end
+
+      def self.deserialize_public_signing_key(raw)
+        OpenSSL::PKey.new_raw_public_key('ED25519', raw)
+      end
+
+      def self.deserialize_private_signing_key(raw)
+        OpenSSL::PKey.new_raw_private_key('ED25519', raw)
+      end
+    end
+
+    module P256
+      def self.deserialize_private_key(secret)
+        asn1_seq = OpenSSL::ASN1.Sequence([
+          OpenSSL::ASN1.Integer(1),
+          OpenSSL::ASN1.OctetString(secret),
+          OpenSSL::ASN1.ObjectId('prime256v1', 0, :EXPLICIT)
+        ])
+
+        OpenSSL::PKey.read(asn1_seq.to_der)
+      end
+
+      def self.deserialize_public_key(serialized_pk)
+        asn1_seq = OpenSSL::ASN1.Sequence([
+          OpenSSL::ASN1.Sequence([
+            OpenSSL::ASN1.ObjectId("id-ecPublicKey"),
+            OpenSSL::ASN1.ObjectId('prime256v1')
+          ]),
+          OpenSSL::ASN1.BitString(serialized_pk)
+        ])
+
+        OpenSSL::PKey.read(asn1_seq.to_der)
+      end
+
+      def self.deserialize_private_encapsulation_key(raw)
+        self.deserialize_private_key(raw)
+      end
+      def self.deserialize_private_signing_key(raw)
+        self.deserialize_private_key(raw)
+      end
+      def self.deserialize_public_encapsulation_key(raw)
+        self.deserialize_public_key(raw)
+      end
+      def self.deserialize_public_signing_key(raw)
+        self.deserialize_public_key(raw)
+      end
+    end
+
+    attr_accessor :level, :digest, :hpke, :kdf, :pkey
     def initialize(suite_id)
       case suite_id
-      when 1
+      when 1 # MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
+        @level = 128
         @digest = OpenSSL::Digest.new('sha256')
         @hpke = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
         @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::X25519
+      when 2 # MLS_128_DHKEMP256_AES128GCM_SHA256_P256
+        @level = 128
+        @digest = OpenSSL::Digest.new('sha256')
+        @hpke = HPKE.new(:p_256, :sha256, :sha256, :aes_128_gcm)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::P256
       end
     end
   end
@@ -78,24 +141,24 @@ class MLS::Crypto
 
   def self.encrypt_with_label(suite, public_key, label, context, plaintext)
     encrypt_context = ("MLS 1.0 " + label).to_vec + context.to_vec
-    pkey = OpenSSL::PKey.new_raw_public_key("X25519", public_key) # TODO
+    pkey = suite.pkey.deserialize_public_encapsulation_key(public_key)
     seal_base(suite, pkey, encrypt_context, "", plaintext)
   end
 
   def self.decrypt_with_label(suite, private_key, label, context, kem_output, ciphertext)
     encrypt_context = ("MLS 1.0 " + label).to_vec + context.to_vec
-    pkey = OpenSSL::PKey.new_raw_private_key("X25519", private_key) # TODO
+    pkey = suite.pkey.deserialize_private_encapsulation_key(private_key)
     open_base(suite, kem_output, pkey, encrypt_context, "", ciphertext)
   end
 
   def self.sign_with_label(suite, signature_key, label, content)
-    skey = OpenSSL::PKey.new_raw_private_key("ED25519", signature_key) # TODO
+    skey = suite.pkey.deserialize_private_signing_key(signature_key)
     sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
     skey.sign(nil, sign_content)
   end
 
   def self.verify_with_label(suite, verification_key, label, content, signature_value)
-    vkey = OpenSSL::PKey.new_raw_public_key("ED25519", verification_key) # TODO
+    vkey = suite.pkey.deserialize_public_signing_key(verification_key)
     sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
     vkey.verify(nil, signature_value, sign_content)
   end
