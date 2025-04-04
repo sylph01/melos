@@ -25,6 +25,7 @@ class MLS::Crypto
     end
 
     module P256
+      # also would like to depend on HPKE gem...
       def self.deserialize_private_key(secret)
         asn1_seq = OpenSSL::ASN1.Sequence([
           OpenSSL::ASN1.Integer(1),
@@ -76,6 +77,12 @@ class MLS::Crypto
         @hpke = HPKE.new(:p_256, :sha256, :sha256, :aes_128_gcm)
         @kdf = @hpke.hkdf
         @pkey = MLS::Crypto::CipherSuite::P256
+      when 3 # MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519
+        @level = 128
+        @digest = OpenSSL::Digest.new('sha256')
+        @hpke = HPKE.new(:x25519, :sha256, :sha256, :chacha20_poly1305)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::X25519
       end
     end
   end
@@ -85,11 +92,6 @@ class MLS::Crypto
       ([0] * length).pack('C*')
     end
   end
-
-  # DIGEST = OpenSSL::Digest::SHA256
-  # DIGEST_INSTANCE = OpenSSL::Digest.new('sha256')
-  # KDF = HPKE::HKDF.new(:sha256)
-  # HPKE = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
 
   def self.ref_hash(suite, label, value)
     ref_hash_input = label.to_vec + value.to_vec
@@ -179,28 +181,11 @@ class MLS::Crypto
     HPKE.n_k
   end
 
-  ## TODO: implement this in HPKE gem
-  def self.aead_encrypt(key, nonce, aad, plaintext)
-    cipher = OpenSSL::Cipher.new('aes-128-gcm')
-    cipher.encrypt
-    cipher.key = key
-    cipher.iv = nonce
-    cipher.auth_data = aad
-    cipher.padding = 0
-    s = cipher.update(pt) << cipher.final
-    s += cipher.auth_tag
+  def self.aead_encrypt(suite, key, nonce, aad, plaintext)
+    suite.hpke.aead_encrypt(key, nonce, aad, plaintext)
   end
 
-  def self.aead_decrypt(key, nonce, aad, ciphertext)
-    ct_body = ciphertext[0, ciphertext.length - HPKE.n_t]
-    tag = ciphertext[-HPKE.n_t, HPKE.n_t]
-    cipher = OpenSSL::Cipher.new('aes-128-gcm')
-    cipher.decrypt
-    cipher.key = key
-    cipher.iv = nonce
-    cipher.auth_tag = tag
-    cipher.auth_data = aad
-    cipher.padding = 0
-    cipher.update(ct_body) << cipher.final
+  def self.aead_decrypt(suite, key, nonce, aad, ciphertext)
+    suite.hpke.aead_decrypt(key, nonce, aad, ciphertext)
   end
 end
