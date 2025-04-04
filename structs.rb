@@ -487,12 +487,12 @@ class MLSStruct::GroupInfo < MLSStruct::Base
     )
   end
 
-  def sign(signer_private)
-    MLS::Crypto.sign_with_label(signer_private_key, "GroupInfoTBS", group_info_tbs.raw)
+  def sign(suite, signer_private)
+    MLS::Crypto.sign_with_label(suite, signer_private_key, "GroupInfoTBS", group_info_tbs.raw)
   end
 
-  def verify(signer_public_key)
-    MLS::Crypto.verify_with_label(signer_public_key, "GroupInfoTBS", group_info_tbs.raw, signature)
+  def verify(suite, signer_public_key)
+    MLS::Crypto.verify_with_label(suite, signer_public_key, "GroupInfoTBS", group_info_tbs.raw, signature)
   end
 end
 

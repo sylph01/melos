@@ -10,9 +10,12 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-transcript_hash_vectors = JSON.parse(File.read('test_vectors/transcript-hashes.json')).select { _1['cipher_suite'] == 1}
+transcript_hash_vectors = JSON.parse(File.read('test_vectors/transcript-hashes.json')).select { _1['cipher_suite'] <= 3}
 
 transcript_hash_vectors.each do |thv|
+  suite = MLS::Crypto::CipherSuite.new(thv['cipher_suite'])
+  puts "cipher suite #{thv['cipher_suite']}:"
+
   confirmation_key = from_hex(thv['confirmation_key'])
   authenticated_content_val = from_hex(thv['authenticated_content'])
   authenticated_content = MLSStruct::AuthenticatedContent.new(authenticated_content_val)
@@ -24,18 +27,18 @@ transcript_hash_vectors.each do |thv|
   puts "[s] AuthenticatedContent has Commit type"
 
   ## MAC, check confirmation tag
-  assert_equal authenticated_content.auth.confirmation_tag, MLS::Crypto.mac(confirmation_key, from_hex(thv['confirmed_transcript_hash_after']))
+  assert_equal authenticated_content.auth.confirmation_tag, MLS::Crypto.mac(suite, confirmation_key, from_hex(thv['confirmed_transcript_hash_after']))
   puts "[s] AuthenticatedContent's FCAD's ConfirmationTag matches MAC"
 
   ## construct ConfirmedTranscriptHashInput
 
   cth = MLS::Crypto.hash(
-    interim_transcript_hash +
-    authenticated_content.confirmed_transcript_hash_input.raw
+    suite,
+    interim_transcript_hash + authenticated_content.confirmed_transcript_hash_input.raw
   )
   ith_next = MLS::Crypto.hash(
-    cth +
-    authenticated_content.auth.confirmation_tag.to_vec
+    suite,
+    cth + authenticated_content.auth.confirmation_tag.to_vec
   )
 
   assert_equal to_hex(cth), thv['confirmed_transcript_hash_after']
