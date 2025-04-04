@@ -93,4 +93,37 @@ class MLS::Crypto
   def self.hash(data)
     DIGEST.digest(data)
   end
+
+  def self.aead_n_n
+    HPKE.n_n
+  end
+
+  def self.aead_n_k
+    HPKE.n_k
+  end
+
+  ## TODO: implement this in HPKE gem
+  def self.aead_encrypt(key, nonce, aad, plaintext)
+    cipher = OpenSSL::Cipher.new('aes-128-gcm')
+    cipher.encrypt
+    cipher.key = key
+    cipher.iv = nonce
+    cipher.auth_data = aad
+    cipher.padding = 0
+    s = cipher.update(pt) << cipher.final
+    s += cipher.auth_tag
+  end
+
+  def self.aead_decrypt(key, nonce, aad, ciphertext)
+    ct_body = ciphertext[0, ciphertext.length - HPKE.n_t]
+    tag = ciphertext[-HPKE.n_t, HPKE.n_t]
+    cipher = OpenSSL::Cipher.new('aes-128-gcm')
+    cipher.decrypt
+    cipher.key = key
+    cipher.iv = nonce
+    cipher.auth_tag = tag
+    cipher.auth_data = aad
+    cipher.padding = 0
+    cipher.update(ct_body) << cipher.final
+  end
 end

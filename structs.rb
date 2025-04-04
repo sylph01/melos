@@ -477,6 +477,23 @@ class MLSStruct::GroupInfo < MLSStruct::Base
     [:signer, :uint32],
     [:signature, :vec]
   ]
+
+  def group_info_tbs
+    MLSStruct::GroupInfoTBS.create(
+      group_context:,
+      extensions:,
+      confirmation_tag:,
+      signer:
+    )
+  end
+
+  def sign(signer_private)
+    MLS::Crypto.sign_with_label(signer_private_key, "GroupInfoTBS", group_info_tbs.raw)
+  end
+
+  def verify(signer_public_key)
+    MLS::Crypto.verify_with_label(signer_public_key, "GroupInfoTBS", group_info_tbs.raw, signature)
+  end
 end
 
 
@@ -488,6 +505,15 @@ class MLSStruct::GroupInfoTBS < MLSStruct::Base
     [:confirmation_tag, :vec], # MAC = opaque <V>
     [:signer, :uint32]
   ]
+
+  def self.create(group_context:, extensions:, confirmation_tag:, signer:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@group_context, group_context)
+    new_instance.instance_variable_set(:@extensions, extensions)
+    new_instance.instance_variable_set(:@confirmation_tag, confirmation_tag)
+    new_instance.instance_variable_set(:@signer, signer)
+    new_instance
+  end
 end
 
 # 12.4.3.1
