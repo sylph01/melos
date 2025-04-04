@@ -110,10 +110,6 @@ class MLS::Crypto
     suite.kdf.extract(salt, ikm)
   end
 
-  def self.kdf_n_h(suite)
-    suite.kdf.n_h
-  end
-
   def self.expand_with_label(suite, secret, label, context, length)
     kdf_label = [length].pack('S>') + ("MLS 1.0 " + label).to_vec + context.to_vec
     suite.kdf.expand(secret, kdf_label, length)
