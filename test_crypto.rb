@@ -12,13 +12,16 @@ self.assertions = 0
 crypto_vectors = JSON.parse(File.read('test_vectors/crypto-basics.json'))
 
 crypto_vectors[0..0].each_with_index do |vector, index|
+  suite = MLS::Crypto::CipherSuite.new(vector['cipher_suite'])
+
   # RefHash
-  ref_hash = MLS::Crypto.ref_hash(vector['ref_hash']['label'], from_hex(vector['ref_hash']['value']))
+  ref_hash = MLS::Crypto.ref_hash(suite, vector['ref_hash']['label'], from_hex(vector['ref_hash']['value']))
   assert_equal to_hex(ref_hash), vector['ref_hash']['out']
   puts "[s] ref_hash"
 
   # expand_with_label
   out = MLS::Crypto.expand_with_label(
+    suite,
     from_hex(vector['expand_with_label']['secret']),
     vector['expand_with_label']['label'],
     from_hex(vector['expand_with_label']['context']),
@@ -29,6 +32,7 @@ crypto_vectors[0..0].each_with_index do |vector, index|
 
   # derive_secret
   out = MLS::Crypto.derive_secret(
+    suite,
     from_hex(vector['derive_secret']['secret']),
     vector['derive_secret']['label']
   )
@@ -37,6 +41,7 @@ crypto_vectors[0..0].each_with_index do |vector, index|
 
   # derive_tree_secret
   out = MLS::Crypto.derive_tree_secret(
+    suite,
     from_hex(vector['derive_tree_secret']['secret']),
     vector['derive_tree_secret']['label'],
     vector['derive_tree_secret']['generation'],
@@ -55,6 +60,7 @@ crypto_vectors[0..0].each_with_index do |vector, index|
   ciphertext = from_hex(vector['encrypt_with_label']['ciphertext'])
 
   pt = MLS::Crypto.decrypt_with_label(
+    suite,
     priv,
     label,
     context,
@@ -64,12 +70,14 @@ crypto_vectors[0..0].each_with_index do |vector, index|
   assert_equal pt, plaintext
 
   kem_output_candidate, ciphertext_candidate = MLS::Crypto.encrypt_with_label(
+    suite,
     pub,
     label,
     context,
     plaintext
   )
   pt2 = MLS::Crypto.decrypt_with_label(
+    suite,
     priv,
     label,
     context,
@@ -87,10 +95,10 @@ crypto_vectors[0..0].each_with_index do |vector, index|
   signature = from_hex(vector['sign_with_label']['signature'])
 
   assert_equal true, MLS::Crypto.verify_with_label(
-    pub, label, content, signature)
+    suite, pub, label, content, signature)
   assert_equal true, MLS::Crypto.verify_with_label(
-    pub, label, content,
-    MLS::Crypto.sign_with_label(priv, label, content)
+    suite, pub, label, content,
+    MLS::Crypto.sign_with_label(suite, priv, label, content)
   )
   puts "[s] sign_with_label"
 end
