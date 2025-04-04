@@ -337,6 +337,10 @@ class MLSStruct::KeyPackage < MLSStruct::Base
     [:extensions, :classes, MLSStruct::Extension],
     [:signature, :vec] # SignWithLabel(., "KeyPackageTBS", KeyPackageTBS)
   ]
+
+  def ref(suite)
+    MLS::Crypto.make_keypackage_ref(suite, self.raw)
+  end
 end
 
 class MLSStruct::KeyPackageTBS < MLSStruct::Base

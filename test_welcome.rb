@@ -23,7 +23,14 @@ welcome_vectors.each do |wv|
   key_package = MLSStruct::MLSMessage.new(from_hex(wv['key_package']))
 
   ## Identify the entry in welcome.secrets corresponding to key_package
-  encrypted_group_secrets = welcome.welcome.secrets.first.encrypted_group_secrets
+  key_package_ref = key_package.key_package.ref(suite)
+  encrypted_group_secrets = welcome.welcome.secrets.find { _1.new_member == key_package_ref }&.encrypted_group_secrets
+
+  if encrypted_group_secrets.nil?
+    puts "[f] Encrypted Group Secrets corresponding to key package reference is not found in Welcome message"
+    exit 1
+  end
+  puts "[s] Identify the entry in welcome.secrets corresponding to key_package"
 
   ## Decrypt the encrypted group secrets using init_priv
   encrypted_group_info = welcome.welcome.encrypted_group_info
