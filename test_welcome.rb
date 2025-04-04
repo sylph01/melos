@@ -38,7 +38,7 @@ welcome_vectors.each do |wv|
   joiner_secret = group_secrets.joiner_secret
   ## TODO: make key schedule into a module
   # note that this is possible because PSKs are empty. We need to calculate psk_secret if psks are present
-  psk_secret = MLS::Crypto.zero_vector(MLS::Crypto.kdf_n_h)
+  psk_secret = MLS::Crypto::Util.zero_vector(MLS::Crypto.kdf_n_h)
   member_secret = MLS::Crypto.kdf_extract(joiner_secret, psk_secret)
   welcome_secret = MLS::Crypto.derive_secret(member_secret, "welcome")
   welcome_nonce = MLS::Crypto.expand_with_label(welcome_secret, "nonce", "", MLS::Crypto.aead_n_n)

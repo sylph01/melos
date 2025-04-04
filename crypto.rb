@@ -5,14 +5,16 @@ require_relative 'vec_base'
 module MLS; end
 
 class MLS::Crypto
+  module Util
+    def self.zero_vector(length)
+      ([0] * length).pack('C*')
+    end
+  end
+
   DIGEST = OpenSSL::Digest::SHA256
   DIGEST_INSTANCE = OpenSSL::Digest.new('sha256')
   KDF = HPKE::HKDF.new(:sha256)
   HPKE = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
-
-  def self.zero_vector(length)
-    ([0] * length).pack('C*')
-  end
 
   def self.ref_hash(label, value)
     ref_hash_input = label.to_vec + value.to_vec

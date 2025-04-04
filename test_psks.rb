@@ -12,7 +12,7 @@ self.assertions = 0
 
 psk_vectors = JSON.parse(File.read('test_vectors/psk_secret.json'))
 psk_vectors.each_with_index do |psk_vector, total_idx|
-  zero_vector = MLS::Crypto.zero_vector(MLS::Crypto.kdf_n_h)
+  zero_vector = MLS::Crypto::Util.zero_vector(MLS::Crypto.kdf_n_h)
   if psk_vector['cipher_suite'] == 1
     puts "vector #{total_idx}, cipher_suite #{psk_vector["cipher_suite"]}"
     psk_secret = zero_vector
