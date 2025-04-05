@@ -1,4 +1,6 @@
-class Tree
+module MLS; end
+
+class MLS::Tree
   attr_accessor :array, :leaf_count
   # attr_reader @array
 
@@ -57,7 +59,11 @@ class Tree
   def remove_node(node_idx)
     @array[node_idx] = nil
   end
-  
+
+  def root
+    self.class.root(@leaf_count)
+  end
+
   class << self
     def log2(x)
       if x == 0
@@ -69,7 +75,7 @@ class Tree
       end
       return (k - 1)
     end
-    
+
     def level(x)
       if x & 0x01 == 0
         return 0
@@ -80,7 +86,7 @@ class Tree
       end
       return k
     end
-    
+
     def node_width(n)
       if n == 0
         0
@@ -88,13 +94,13 @@ class Tree
         2 * (n - 1) + 1
       end
     end
-    
+
     def root(n)
       w = node_width(n)
-      
+
       (1 << log2(w)) - 1
     end
-    
+
     def left(x)
       k = level(x)
       raise ArgumentError.new('leaf node has no children') if k == 0
@@ -139,7 +145,7 @@ class Tree
       d = direct_path(x)
       d.insert(0, x)
       d.pop
-      
+
       d.map { sibling(_1, n) }
     end
 
