@@ -923,7 +923,7 @@ class MLSStruct::PrivateMessageContent < MLSStruct::Base
     # deserialize application_data/proposal/commit
     case content_type
     when 0x01 # application
-      value, buf = deserialize_elem(buf, :vec, nil)
+      value, buf = String.parse_vec(buf)
       context << [:application_data, value]
     when 0x02 # proposal
       value, buf = MLSStruct::Proposal.new_and_rest(buf)

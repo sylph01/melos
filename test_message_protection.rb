@@ -180,4 +180,44 @@ message_protection_vectors.each do |mpv|
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 
   ### application
+  puts "application:"
+  application = from_hex(mpv['application'])
+  application_priv = MLSStruct::MLSMessage.new(from_hex(mpv['application_priv']))
+
+  puts "[skip] Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data (pub does not exist)"
+  ## TODO: verify that protecting application message fails
+  puts "[TODO] verify that protecting application message fails"
+
+  #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  authenticated_content = application_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
+  puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
+
+  #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
+  # reset secret tree
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  # create FramedContent -> AuthenticatedContent then sign it
+  framed_content = MLSStruct::FramedContent.create(
+    group_id: group_id,
+    epoch: epoch,
+    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+    content_type: 0x01, # application
+    content: application
+  )
+  authenticated_content_4 = MLSStruct::AuthenticatedContent.create(
+    wire_format: 0x02, # private_message
+    content: framed_content,
+    auth: nil
+  )
+  authenticated_content_4.sign(suite, signature_priv, group_context)
+  private_message_4 = MLSStruct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+
+  # reset secret tree
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
+  assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
+  puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
+
 end
