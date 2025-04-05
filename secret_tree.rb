@@ -29,6 +29,46 @@ module MLS::SecretTree
     end
   end
 
+  def self.ratchet_until_and_get(suite, content_type, tree, leaf_index, generation)
+    # TODO: clear the value on tree when getting
+    case content_type
+    when 0x02, 0x03
+      ratchet_handshake_until(suite, tree, leaf_index, generation)
+      [
+        tree.leaf_at(leaf_index)['handshake_key'],
+        tree.leaf_at(leaf_index)['handshake_nonce'],
+        generation
+      ]
+    else
+      ratchet_application_until(suite, tree, leaf_index, generation)
+      [
+        tree.leaf_at(leaf_index)['application_key'],
+        tree.leaf_at(leaf_index)['application_nonce'],
+        generation
+      ]
+    end
+  end
+
+  def self.ratchet_and_get(suite, content_type, tree, leaf_index)
+    # TODO: clear the value on tree when getting
+    case content_type
+    when 0x02, 0x03
+      ratchet_handshake(suite, tree, leaf_index)
+      [
+        tree.leaf_at(leaf_index)['handshake_key'],
+        tree.leaf_at(leaf_index)['handshake_nonce'],
+        tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] - 1, # returns current generation
+      ]
+    else
+      ratchet_application(suite, tree, leaf_index)
+      [
+        tree.leaf_at(leaf_index)['application_key'],
+        tree.leaf_at(leaf_index)['application_nonce'],
+        tree.leaf_at(leaf_index)['next_application_ratchet_secret_generation'] - 1, # returns current generation
+      ]
+    end
+  end
+
   def self.ratchet_application_until(suite, tree, leaf_index, generation)
     while (tree.leaf_at(leaf_index)['next_application_ratchet_secret_generation'] <= generation)
       ratchet_application(suite, tree, leaf_index)

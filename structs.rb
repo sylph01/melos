@@ -1,5 +1,6 @@
 require_relative 'vec_base.rb'
 require_relative 'mls_struct_base.rb'
+require 'securerandom'
 
 class MLSStruct::EncryptContext < MLSStruct::Base
   attr_reader :label, :context
@@ -43,6 +44,14 @@ class MLSStruct::SenderData < MLSStruct::Base
     [:generation, :uint32],
     [:reuse_guard, :opaque, 4]
   ]
+
+  def self.create(leaf_index:, generation:, reuse_guard:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@leaf_index, leaf_index)
+    new_instance.instance_variable_set(:@generation, generation)
+    new_instance.instance_variable_set(:@reuse_guard, reuse_guard)
+    new_instance
+  end
 end
 
 ## 7.1
@@ -781,27 +790,75 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     [:ciphertext, :vec]
   ]
 
+  def self.create(group_id:, epoch:, content_type:, authenticated_data:, encrypted_sender_data:, ciphertext:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@group_id, group_id)
+    new_instance.instance_variable_set(:@epoch, epoch)
+    new_instance.instance_variable_set(:@content_type, content_type)
+    new_instance.instance_variable_set(:@authenticated_data, authenticated_data)
+    new_instance.instance_variable_set(:@encrypted_sender_data, encrypted_sender_data)
+    new_instance.instance_variable_set(:@ciphertext, ciphertext)
+    new_instance
+  end
+
   def sender_data_aad
-    group_id.to_vec + [epoch].pack('Q>') + [content_type].pack('C')
+    self.class.sender_data_aad_impl(group_id, epoch, content_type)
+  end
+
+  def self.sender_data_aad_impl(gid, ep, ct)
+    gid.to_vec + [ep].pack('Q>') + [ct].pack('C')
   end
 
   def private_content_aad
-    group_id.to_vec + [epoch].pack('Q>') + [content_type].pack('C') + authenticated_data.to_vec
+    self.class.private_content_aad_impl(group_id, epoch, content_type, authenticated_data)
+  end
+
+  def self.private_content_aad_impl(gid, ep, ct, ad)
+    gid.to_vec + [ep].pack('Q>') + [ct].pack('C') + ad.to_vec
+  end
+
+  def self.protect(authenticated_content, suite, secret_tree, sender_data_secret, padding_size)
+    leaf_index = authenticated_content.content.sender.leaf_index
+    content_type = authenticated_content.content.content_type
+    reuse_guard = SecureRandom.random_bytes(4)
+    key, nonce, generation = MLS::SecretTree::ratchet_and_get(suite, content_type, secret_tree, leaf_index)
+    new_nonce = apply_nonce_reuse_guard(nonce, reuse_guard)
+
+    private_message_content_plain = serialize_private_message_content(authenticated_content.content, authenticated_content.auth, padding_size)
+    aad = private_content_aad_impl(
+      authenticated_content.content.group_id,
+      authenticated_content.content.epoch,
+      authenticated_content.content.content_type,
+      authenticated_content.content.authenticated_data)
+    private_message_content_ciphertext = MLS::Crypto.aead_encrypt(suite, key, new_nonce, aad, private_message_content_plain)
+
+    sender_data_plain = MLSStruct::SenderData.create(
+      leaf_index: leaf_index,
+      generation: generation,
+      reuse_guard: reuse_guard
+    )
+    sd_aad = sender_data_aad_impl(
+      authenticated_content.content.group_id,
+      authenticated_content.content.epoch,
+      authenticated_content.content.content_type)
+    sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, private_message_content_ciphertext)
+    sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, private_message_content_ciphertext)
+    sender_data_ciphertext = MLS::Crypto.aead_encrypt(suite, sender_data_key, sender_data_nonce, sd_aad, sender_data_plain.raw)
+
+    create(
+      group_id: authenticated_content.content.group_id,
+      epoch: authenticated_content.content.epoch,
+      content_type: authenticated_content.content.content_type,
+      authenticated_data: authenticated_content.content.authenticated_data,
+      encrypted_sender_data: sender_data_ciphertext,
+      ciphertext: private_message_content_ciphertext
+    )
   end
 
   def unprotect(suite, secret_tree, sender_data_secret)
     sender_data = decrypt_sender_data(suite, sender_data_secret)
-    case content_type
-    when 0x02, 0x03
-      MLS::SecretTree.ratchet_handshake_until(suite, secret_tree, sender_data.leaf_index, sender_data.generation)
-      key = secret_tree.leaf_at(sender_data.leaf_index)['handshake_key']
-      nonce = secret_tree.leaf_at(sender_data.leaf_index)['handshake_nonce']
-    else
-      MLS::SecretTree.ratchet_application_until(suite, secret_tree, sender_data.leaf_index, sender_data.generation)
-      key = secret_tree.leaf_at(sender_data.leaf_index)['application_key']
-      nonce = secret_tree.leaf_at(sender_data.leaf_index)['application_nonce']
-    end
-    new_nonce = apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
+    key, nonce, _ = MLS::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
+    new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
     pmc, _ = MLSStruct::PrivateMessageContent.new_and_rest_with_content_type(MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext), content_type)
 
     fc = MLSStruct::FramedContent.create(
@@ -827,13 +884,31 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     MLSStruct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
   end
 
-  def apply_nonce_reuse_guard(nonce, guard)
+  def self.apply_nonce_reuse_guard(nonce, guard)
     guard_arr = guard.unpack('c*')
     nonce_arr = nonce.unpack('c*')
     guard_arr.each_with_index do |char, index|
       nonce_arr[index] = nonce_arr[index] ^ char
     end
     nonce_arr.pack('C*')
+  end
+
+  def self.serialize_private_message_content(framed_content, framed_content_auth_data, padding_size)
+    buf = ''
+    case framed_content.content_type
+    when 0x01 # application
+      buf += framed_content.application_data.to_vec
+    when 0x02 # proposal
+      buf += framed_content.proposal.raw
+    when 0x03 # commit
+      buf += framed_content.commit.raw
+    end
+    buf += framed_content_auth_data.signature.to_vec
+    if framed_content.content_type == 0x03 # commit
+      buf += auth.confirmation_tag.to_vec
+    end
+    buf += MLS::Crypto::Util.zero_vector(padding_size)
+    buf
   end
 end
 
