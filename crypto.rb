@@ -22,6 +22,10 @@ class MLS::Crypto
       def self.deserialize_private_signing_key(raw)
         OpenSSL::PKey.new_raw_private_key('ED25519', raw)
       end
+
+      def self.hash_algorithm
+        nil
+      end
     end
 
     module X448
@@ -39,6 +43,10 @@ class MLS::Crypto
 
       def self.deserialize_private_signing_key(raw)
         OpenSSL::PKey.new_raw_private_key('ED448', raw)
+      end
+
+      def self.hash_algorithm
+        nil
       end
     end
 
@@ -84,17 +92,29 @@ class MLS::Crypto
       def self.curve_name
         'prime256v1'
       end
+
+      def self.hash_algorithm
+        'sha256'
+      end
     end
 
     class P384 < EC
       def self.curve_name
         'secp384r1'
       end
+
+      def self.hash_algorithm
+        'sha384'
+      end
     end
 
     class P521 < EC
       def self.curve_name
         'secp521r1'
+      end
+
+      def self.hash_algorithm
+        'sha512'
       end
     end
 
@@ -212,13 +232,13 @@ class MLS::Crypto
   def self.sign_with_label(suite, signature_key, label, content)
     skey = suite.pkey.deserialize_private_signing_key(signature_key)
     sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
-    skey.sign(nil, sign_content)
+    skey.sign(suite.pkey.hash_algorithm, sign_content)
   end
 
   def self.verify_with_label(suite, verification_key, label, content, signature_value)
     vkey = suite.pkey.deserialize_public_signing_key(verification_key)
     sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
-    vkey.verify(nil, signature_value, sign_content)
+    vkey.verify(suite.pkey.hash_algorithm, signature_value, sign_content)
   end
 
   def self.mac(suite, key, data)

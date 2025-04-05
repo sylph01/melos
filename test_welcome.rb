@@ -66,12 +66,8 @@ welcome_vectors.each do |wv|
 
   ## Verify the signature on the decrypted group info using signer_pub
   ## known issue: this fails on cipher suite 5 and 7
-  if (![5, 7].include?(wv['cipher_suite']))
-    assert_equal group_info.verify(suite, signer_pub_raw), true
-    puts "[s] Verify the signature on the decrypted group info using signer_pub"
-  else
-    puts "[skipped] Verify the signature on the decrypted group info using signer_pub"
-  end
+  assert_equal group_info.verify(suite, signer_pub_raw), true
+  puts "[s] Verify the signature on the decrypted group info using signer_pub"
 
   ## Initialize a key schedule epoch using the decrypted joiner_secret and no PSKs
   epoch_secret = MLS::Crypto.expand_with_label(suite, member_secret, "epoch", group_info.group_context.raw, suite.kdf.n_h)

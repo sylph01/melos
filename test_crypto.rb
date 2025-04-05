@@ -95,12 +95,9 @@ crypto_vectors.each_with_index do |vector, index|
   label = vector['sign_with_label']['label']
   signature = from_hex(vector['sign_with_label']['signature'])
 
-  # known issue: cipher suite ID 5 fails this test
-  if (vector['cipher_suite' != 5])
-    assert_equal true, MLS::Crypto.verify_with_label(
-      suite, pub, label, content, signature
-    )
-  end
+  assert_equal true, MLS::Crypto.verify_with_label(
+    suite, pub, label, content, signature
+  )
   # all suites pass this
   assert_equal true, MLS::Crypto.verify_with_label(
     suite, pub, label, content,
