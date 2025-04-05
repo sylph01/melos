@@ -169,14 +169,6 @@ class MLS::Crypto
     suite.digest.digest(data)
   end
 
-  def self.aead_n_n
-    HPKE.n_n
-  end
-
-  def self.aead_n_k
-    HPKE.n_k
-  end
-
   def self.aead_encrypt(suite, key, nonce, aad, plaintext)
     suite.hpke.aead_encrypt(key, nonce, aad, plaintext)
   end
