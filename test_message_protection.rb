@@ -185,8 +185,26 @@ message_protection_vectors.each do |mpv|
   application_priv = MLSStruct::MLSMessage.new(from_hex(mpv['application_priv']))
 
   puts "[skip] Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data (pub does not exist)"
-  ## TODO: verify that protecting application message fails
-  puts "[TODO] verify that protecting application message fails"
+
+  ## verify that protecting application message fails
+  # create FramedContent
+  framed_content = MLSStruct::FramedContent.create(
+    group_id: group_id,
+    epoch: epoch,
+    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+    content_type: 0x01, # commit
+    content: application
+  )
+  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+    wire_format: 0x01, # public_message
+    content: framed_content,
+    auth: nil
+  )
+  assert_raises ArgumentError do
+    authenticated_content_2.sign(suite, signature_priv, group_context)
+  end
+  puts "[s] verify that protecting application message fails"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)

@@ -729,6 +729,7 @@ class MLSStruct::AuthenticatedContent < MLSStruct::Base
 
   # populate auth with values
   def sign(suite, signature_private_key, group_context)
+    raise ArgumentError.new('Application data cannot be sent as a PublicMessage') if wire_format == 0x01 && content.content_type == 0x01
     content_tbs = content.content_tbs(0x01, wire_format, group_context)
     signature = MLS::Crypto.sign_with_label(suite, signature_private_key, "FramedContentTBS", content_tbs)
     @auth = MLSStruct::FramedContentAuthData.create(
