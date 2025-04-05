@@ -572,6 +572,20 @@ class MLSStruct::Sender < MLSStruct::Base
     [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == 0x01}, :uint32], # 0x01 = member
     [:sender_index, :select, ->(ctx){ctx[:sender_type] == 0x02}, :uint32], # 0x02 = external
   ]
+
+  def self.create_member(leaf_index)
+    instance = self.allocate
+    instance.instance_variable_set(:@sender_type, 0x01)
+    instance.instance_variable_set(:@leaf_index, leaf_index)
+    instance
+  end
+
+  def self.create_external(sender_index)
+    instance = self.allocate
+    instance.instance_variable_set(:@sender_type, 0x02)
+    instance.instance_variable_set(:@sender_index, sender_index)
+    instance
+  end
 end
 
 class MLSStruct::FramedContentAuthData < MLSStruct::Base
@@ -628,6 +642,24 @@ class MLSStruct::FramedContent < MLSStruct::Base
     end
     buf
   end
+
+  def self.create(group_id:, epoch:, sender:, authenticated_data:, content_type:, content:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@group_id, group_id)
+    new_instance.instance_variable_set(:@epoch, epoch)
+    new_instance.instance_variable_set(:@sender, sender)
+    new_instance.instance_variable_set(:@authenticated_data, authenticated_data)
+    new_instance.instance_variable_set(:@content_type, content_type)
+    case content_type
+    when 0x01 # application_data
+      new_instance.instance_variable_set(:@application_data, content)
+    when 0x02 # proposal
+      new_instance.instance_variable_set(:@proposal, content)
+    when 0x03 # commit
+      new_instance.instance_variable_set(:@commit, content)
+    end
+    new_instance
+  end
 end
 
 class MLSStruct::FramedContentTBS < MLSStruct::Base
@@ -658,6 +690,22 @@ class MLSStruct::AuthenticatedContent < MLSStruct::Base
       content: content,
       signature: auth.signature
     )
+  end
+
+  def verify(suite, signature_public_key, context)
+    return false if (wire_format == 0x01 && content.content_type == 0x01)
+
+    content_tbs = content.content_tbs(0x01, wire_format, context)
+
+    return MLS::Crypto.verify_with_label(suite, signature_public_key, "FramedContentTBS", content_tbs, auth.signature)
+  end
+
+  def self.create(wire_format:, content:, auth:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@wire_format, wire_format)
+    new_instance.instance_variable_set(:@content, content)
+    new_instance.instance_variable_set(:@auth, auth)
+    new_instance
   end
 end
 
@@ -705,13 +753,7 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     group_id.to_vec + [epoch].pack('Q>') + [content_type].pack('C') + authenticated_data.to_vec
   end
 
-  def decrypt_sender_data(suite, sender_data_secret)
-    sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, ciphertext)
-    sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, ciphertext)
-    MLSStruct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
-  end
-
-  def decrypt_ciphertext(suite, secret_tree, sender_data_secret)
+  def unprotect(suite, secret_tree, sender_data_secret)
     sender_data = decrypt_sender_data(suite, sender_data_secret)
     case content_type
     when 0x02, 0x03
@@ -724,7 +766,29 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
       nonce = secret_tree.leaf_at(sender_data.leaf_index)['application_nonce']
     end
     new_nonce = apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
-    MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext)
+    pmc, _ = MLSStruct::PrivateMessageContent.new_and_rest_with_content_type(MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext), content_type)
+
+    fc = MLSStruct::FramedContent.create(
+      group_id: group_id,
+      epoch: epoch,
+      sender: MLSStruct::Sender.create_member(sender_data.leaf_index),
+      authenticated_data: authenticated_data,
+      content_type: content_type,
+      content: pmc.content
+    )
+
+    MLSStruct::AuthenticatedContent.create(
+      wire_format: 0x0002, # private_message
+      content: fc,
+      auth: pmc.auth
+    )
+  end
+
+  private
+  def decrypt_sender_data(suite, sender_data_secret)
+    sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, ciphertext)
+    sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, ciphertext)
+    MLSStruct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
   end
 
   def apply_nonce_reuse_guard(nonce, guard)
@@ -737,9 +801,37 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
   end
 end
 
-class MLSStruct::PrivateMessageContent
+class MLSStruct::PrivateMessageContent < MLSStruct::Base
+  attr_accessor :application_data, :proposal, :commit, :auth, :padding
   # bytes -> struct: decode the content and auth field, rest is padding
   # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
+
+  def self.new_and_rest_with_content_type(buf, content_type)
+    instance = self.allocate
+    context = []
+    # deserialize application_data/proposal/commit
+    case content_type
+    when 0x01 # application
+      value, buf = deserialize_elem(buf, :vec, nil)
+      context << [:application_data, value]
+    when 0x02 # proposal
+      value, buf = MLSStruct::Proposal.new_and_rest(buf)
+      context << [:proposal, value]
+    when 0x03 # commit
+      value, buf = MLSStruct::Commit.new_and_rest(buf)
+      context << [:commit, value]
+    end
+    fcad, buf = MLSStruct::FramedContentAuthData.new_and_rest_with_content_type(buf, content_type)
+    context << [:auth, fcad]
+    # assume rest is padding
+    context << [:padding, buf]
+    instance.send(:set_instance_vars, context)
+    [instance, '']
+  end
+
+  def content
+    @application_data || @proposal || @commit
+  end
 end
 
 ## 8.2

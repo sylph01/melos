@@ -56,15 +56,11 @@ message_protection_vectors.each do |mpv|
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
-  puts to_hex proposal_priv.private_message.decrypt_ciphertext(suite, secret_tree, sender_data_secret)
+  authenticated_content = proposal_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
+  puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
-  # MLS::SecretTree.ratchet(suite, secret_tree, 1)
-  # secret_tree_content = secret_tree.leaf_at(1)
-
-
-  # p proposal
-  # p proposal_pub
-  # p proposal_priv
+  #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
 
   ### commit
 
