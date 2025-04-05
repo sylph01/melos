@@ -9,6 +9,13 @@ class MLS::Tree
     @leaf_count = 0
   end
 
+  def self.empty_tree(n_leaves)
+    instance = self.allocate
+    instance.leaf_count = n_leaves
+    instance.array = Array.new(node_width(n_leaves))
+    instance
+  end
+
   def add(val)
     raise ArgumentError.new('Cannot add nil element') if val.nil?
     if @leaf_count == 0
@@ -62,6 +69,10 @@ class MLS::Tree
 
   def root
     self.class.root(@leaf_count)
+  end
+
+  def leaf_at(leaf_index)
+    @array[leaf_index * 2]
   end
 
   class << self
@@ -158,6 +169,10 @@ class MLS::Tree
       end
 
       dxy.min { level(_1) }
+    end
+
+    def leaf?(node_index)
+      node_index % 2 == 0
     end
 
     # def common_ancestor_direct(x, y)
