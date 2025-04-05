@@ -719,17 +719,22 @@ class MLSStruct::PublicMessage < MLSStruct::Base
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
 
-  def verify(suite, signer_public_key, version, wire_format, group_context)
-    MLS::Crypto.verify_with_label(suite, signer_public_key, "FramedContentTBS", content.content_tbs(version, wire_format, group_context), auth.signature)
+  def unprotect(suite, membership_key, group_context)
+    ## if sender type is member then membershipMac(suite, membership_key, group_context)
+    if (content.sender.sender_type == 0x01)
+      return nil if membership_tag != membership_mac(suite, membership_key, group_context)
+    end
+    MLSStruct::AuthenticatedContent.create(
+      wire_format: 0x01, # public_message
+      content: content,
+      auth: auth
+    )
   end
-end
 
-class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
-  attr_reader :content_tbs, :auth
-  STRUCT = [
-    [:content_tbs, :class, MLSStruct::FramedContentTBS],
-    [:auth, :class, MLSStruct::FramedContentAuthData]
-  ]
+  def membership_mac(suite, membership_key, group_context)
+    authenticated_content_tbm = content.content_tbs(0x01, 0x01, group_context) + auth.raw
+    MLS::Crypto.mac(suite, membership_key, authenticated_content_tbm)
+  end
 end
 
 ## 6.3

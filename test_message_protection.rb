@@ -46,7 +46,8 @@ message_protection_vectors.each do |mpv|
   proposal_priv = MLSStruct::MLSMessage.new(from_hex(mpv['proposal_priv']))
 
   #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
-  assert_equal true, proposal_pub.verify(suite, signature_pub, group_context)
+  authenticated_content = proposal_pub.public_message.unprotect(suite, membership_key, group_context)
+  assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] pub message verifies with the provided membership_key and signature_pub"
   assert_equal from_hex(mpv['proposal']), proposal_pub.public_message.content.proposal.raw
   puts "[s] produces the raw proposal"
@@ -61,6 +62,7 @@ message_protection_vectors.each do |mpv|
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
+  #### TODO
 
   ### commit
 
