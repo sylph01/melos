@@ -118,6 +118,8 @@ class MLSStruct::Base
     when :opaque
       value = buf.byteslice(0, type_param.to_i)
       buf = buf.byteslice((type_param.to_i)..)
+    when :padding
+      value = buf
     end
     [value, buf]
   end
@@ -149,6 +151,8 @@ class MLSStruct::Base
         [1].pack('C') + value.raw
       end
     when :opaque
+      value
+    when :padding
       value
     end
   end

@@ -45,15 +45,6 @@ class MLSStruct::SenderData < MLSStruct::Base
   ]
 end
 
-class MLSStruct::SenderDataAAD < MLSStruct::Base
-  attr_reader :group_id, :epoch, :content_type
-  STRUCT = [
-    [:group_id, :vec],
-    [:epoch, :uint64],
-    [:content_type, :uint8]
-  ]
-end
-
 ## 7.1
 
 class MLSStruct::ParentNode < MLSStruct::Base
@@ -635,6 +626,7 @@ class MLSStruct::FramedContent < MLSStruct::Base
     when 0x02, 0x03 # external, new_member_proposal
       # do nothing
     end
+    buf
   end
 end
 
@@ -678,6 +670,10 @@ class MLSStruct::PublicMessage < MLSStruct::Base
     [:auth, :framed_content_auth_data],
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
+
+  def verify(suite, signer_public_key, version, wire_format, group_context)
+    MLS::Crypto.verify_with_label(suite, signer_public_key, "FramedContentTBS", content.content_tbs(version, wire_format, group_context), auth.signature)
+  end
 end
 
 class MLSStruct::AuthenticatedContentTBM < MLSStruct::Base
@@ -700,21 +696,50 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     [:encrypted_sender_data, :vec],
     [:ciphertext, :vec]
   ]
+
+  def sender_data_aad
+    group_id.to_vec + [epoch].pack('Q>') + [content_type].pack('C')
+  end
+
+  def private_content_aad
+    group_id.to_vec + [epoch].pack('Q>') + [content_type].pack('C') + authenticated_data.to_vec
+  end
+
+  def decrypt_sender_data(suite, sender_data_secret)
+    sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, ciphertext)
+    sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, ciphertext)
+    MLSStruct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
+  end
+
+  def decrypt_ciphertext(suite, secret_tree, sender_data_secret)
+    sender_data = decrypt_sender_data(suite, sender_data_secret)
+    case content_type
+    when 0x02, 0x03
+      MLS::SecretTree.ratchet_handshake_until(suite, secret_tree, sender_data.leaf_index, sender_data.generation)
+      key = secret_tree.leaf_at(sender_data.leaf_index)['handshake_key']
+      nonce = secret_tree.leaf_at(sender_data.leaf_index)['handshake_nonce']
+    else
+      MLS::SecretTree.ratchet_application_until(suite, secret_tree, sender_data.leaf_index, sender_data.generation)
+      key = secret_tree.leaf_at(sender_data.leaf_index)['application_key']
+      nonce = secret_tree.leaf_at(sender_data.leaf_index)['application_nonce']
+    end
+    new_nonce = apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
+    MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext)
+  end
+
+  def apply_nonce_reuse_guard(nonce, guard)
+    guard_arr = guard.unpack('c*')
+    nonce_arr = nonce.unpack('c*')
+    guard_arr.each_with_index do |char, index|
+      nonce_arr[index] = nonce_arr[index] ^ char
+    end
+    nonce_arr.pack('C*')
+  end
 end
 
 class MLSStruct::PrivateMessageContent
   # bytes -> struct: decode the content and auth field, rest is padding
   # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
-end
-
-class MLSStruct::PrivateContentAAD
-  attr_reader :group_id, :epoch, :content_type, :authenticated_data
-  STRUCT = [
-    [:group_id, :vec],
-    [:epoch, :uint64],
-    [:content_type, :uint8],
-    [:authenticated_data, :vec]
-  ]
 end
 
 ## 8.2
@@ -754,6 +779,12 @@ class MLSStruct::MLSMessage < MLSStruct::Base
     [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLSStruct::GroupInfo],
     [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLSStruct::KeyPackage]
   ]
+
+  def verify(suite, signer_public_key, group_context)
+    if wire_format == 0x0001
+      public_message.verify(suite, signer_public_key, version, wire_format, group_context)
+    end
+  end
 end
 
 ## Ratchet Tree Extension (12.4.3.3)
