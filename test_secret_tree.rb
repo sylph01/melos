@@ -33,9 +33,7 @@ secret_tree_vectors.each do |stv|
   ## Initialize a secret tree with a number of leaves equal to the number of entries in the leaves array
   secret_tree = MLS::SecretTree.create(suite, n_leaves, encryption_secret)
 
-  # p secret_tree.array
   stv['leaves'].each_with_index do |array, leaf_index|
-    # assumes that generation only goes up till 15
     puts "for leaf index #{leaf_index}:"
     array.each do |gen|
       MLS::SecretTree.ratchet_application_until(suite, secret_tree, leaf_index, gen['generation'])
