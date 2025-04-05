@@ -905,7 +905,7 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     end
     buf += framed_content_auth_data.signature.to_vec
     if framed_content.content_type == 0x03 # commit
-      buf += auth.confirmation_tag.to_vec
+      buf += framed_content_auth_data.confirmation_tag.to_vec
     end
     buf += MLS::Crypto::Util.zero_vector(padding_size)
     buf

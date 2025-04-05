@@ -107,6 +107,77 @@ message_protection_vectors.each do |mpv|
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 
   ### commit
+  puts "commit:"
+  commit = MLSStruct::Commit.new(from_hex(mpv['commit']))
+  commit_pub = MLSStruct::MLSMessage.new(from_hex(mpv['commit_pub']))
+  commit_priv = MLSStruct::MLSMessage.new(from_hex(mpv['commit_priv']))
+
+  #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
+  authenticated_content = commit_pub.public_message.unprotect(suite, membership_key, group_context)
+  assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
+  puts "[s] pub message verifies with the provided membership_key and signature_pub"
+  assert_equal from_hex(mpv['commit']), commit_pub.public_message.content.commit.raw
+  puts "[s] produces the raw commit"
+
+  #### Verify that protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub
+  # create FramedContent
+  framed_content = MLSStruct::FramedContent.create(
+    group_id: group_id,
+    epoch: epoch,
+    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+    content_type: 0x03, # commit
+    content: commit
+  )
+  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+    wire_format: 0x01, # public_message
+    content: framed_content,
+    auth: nil
+  )
+  authenticated_content_2.sign(suite, signature_priv, group_context)
+
+  ### NOTE: BouncyCastle just derives a key from a zero vector and uses it to construct a confirmation tag. Is that legal...? But we don't have a active key schedule so that might be the way to go
+  confirmation_tag = MLS::Crypto.derive_secret(suite, MLS::Crypto::Util.zero_vector(suite.kdf.n_h), "confirmation_tag")
+  ### and here we directly set it inside authenticated content...
+  authenticated_content_2.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+
+  public_message_2 = MLSStruct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
+  authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
+  puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
+
+  #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  authenticated_content = commit_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
+  puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
+
+  #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
+  # reset secret tree
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  # create FramedContent -> AuthenticatedContent then sign it
+  framed_content = MLSStruct::FramedContent.create(
+    group_id: group_id,
+    epoch: epoch,
+    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+    content_type: 0x03, # commit
+    content: commit
+  )
+  authenticated_content_4 = MLSStruct::AuthenticatedContent.create(
+    wire_format: 0x02, # private_message
+    content: framed_content,
+    auth: nil
+  )
+  authenticated_content_4.sign(suite, signature_priv, group_context)
+  ### and here we directly set it inside authenticated content...
+  authenticated_content_4.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+  private_message_4 = MLSStruct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+
+  # reset secret tree
+  secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
+  authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
+  assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
+  puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 
   ### application
 end
