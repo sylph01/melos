@@ -256,4 +256,14 @@ class MLS::Crypto
   def self.aead_decrypt(suite, key, nonce, aad, ciphertext)
     suite.hpke.aead_decrypt(key, nonce, aad, ciphertext)
   end
+
+  def self.sender_data_key(suite, sender_data_secret, ciphertext)
+    ciphertext_sample = ciphertext[0..(suite.kdf.n_h - 1)]
+    expand_with_label(suite, sender_data_secret, "key", ciphertext_sample, suite.hpke.n_k)
+  end
+
+  def self.sender_data_nonce(suite, sender_data_secret, ciphertext)
+    ciphertext_sample = ciphertext[0..(suite.kdf.n_h - 1)]
+    expand_with_label(suite, sender_data_secret, "nonce", ciphertext_sample, suite.hpke.n_n)
+  end
 end

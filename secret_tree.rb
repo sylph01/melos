@@ -4,14 +4,10 @@ require_relative 'crypto'
 module MLS; end
 
 module MLS::SecretTree
-  def self.sender_data_key(suite, sender_data_secret, ciphertext)
-    ciphertext_sample = ciphertext[0..(suite.kdf.n_h - 1)]
-    MLS::Crypto.expand_with_label(suite, sender_data_secret, "key", ciphertext_sample, suite.hpke.n_k)
-  end
-
-  def self.sender_data_nonce(suite, sender_data_secret, ciphertext)
-    ciphertext_sample = ciphertext[0..(suite.kdf.n_h - 1)]
-    MLS::Crypto.expand_with_label(suite, sender_data_secret, "nonce", ciphertext_sample, suite.hpke.n_n)
+  def self.create(suite, n_leaves, encryption_secret)
+    st = MLS::Tree.empty_tree(n_leaves)
+    populate_tree(suite, st, encryption_secret)
+    st
   end
 
   def self.populate_tree(suite, tree, root_secret)

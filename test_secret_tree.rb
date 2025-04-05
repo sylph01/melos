@@ -22,8 +22,8 @@ secret_tree_vectors.each do |stv|
   sender_data_secret = from_hex(stv['sender_data']['sender_data_secret'])
   ciphertext         = from_hex(stv['sender_data']['ciphertext'])
 
-  sender_data_key   = MLS::SecretTree.sender_data_key(suite, sender_data_secret, ciphertext)
-  sender_data_nonce = MLS::SecretTree.sender_data_nonce(suite, sender_data_secret, ciphertext)
+  sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, ciphertext)
+  sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, ciphertext)
   assert_equal to_hex(sender_data_key), stv['sender_data']['key']
   puts '[s] key == sender_data_key(sender_data_secret, ciphertext)'
   assert_equal to_hex(sender_data_nonce), stv['sender_data']['nonce']
@@ -31,9 +31,7 @@ secret_tree_vectors.each do |stv|
 
   encryption_secret = from_hex(stv['encryption_secret'])
   ## Initialize a secret tree with a number of leaves equal to the number of entries in the leaves array
-  secret_tree = MLS::Tree.empty_tree(n_leaves)
-  ## with encryption_secret as the root secret
-  MLS::SecretTree.populate_tree(suite, secret_tree, encryption_secret)
+  secret_tree = MLS::SecretTree.create(suite, n_leaves, encryption_secret)
 
   # p secret_tree.array
   stv['leaves'].each_with_index do |array, leaf_index|
