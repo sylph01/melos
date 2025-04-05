@@ -40,7 +40,8 @@ secret_tree_vectors.each do |stv|
     # assumes that generation only goes up till 15
     puts "for leaf index #{leaf_index}:"
     (0..15).each do |gen_num|
-      MLS::SecretTree.ratchet(suite, secret_tree, leaf_index)
+      MLS::SecretTree.ratchet_application(suite, secret_tree, leaf_index)
+      MLS::SecretTree.ratchet_handshake(suite, secret_tree, leaf_index)
       # check if there is a generation that matches
       generation = array.find { _1['generation'] == gen_num}
       if !generation.nil?
