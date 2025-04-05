@@ -10,7 +10,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-key_schedule_vectors = JSON.parse(File.read('test_vectors/key-schedule.json'))[0..2]
+key_schedule_vectors = JSON.parse(File.read('test_vectors/key-schedule.json'))
 key_schedule_vectors.each do |key_schedule_vector|
   suite = MLS::Crypto::CipherSuite.new(key_schedule_vector['cipher_suite'])
   puts "for cipher suite ID #{key_schedule_vector['cipher_suite']}:"

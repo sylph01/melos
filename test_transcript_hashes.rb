@@ -10,7 +10,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-transcript_hash_vectors = JSON.parse(File.read('test_vectors/transcript-hashes.json')).select { _1['cipher_suite'] <= 3}
+transcript_hash_vectors = JSON.parse(File.read('test_vectors/transcript-hashes.json'))
 
 transcript_hash_vectors.each do |thv|
   suite = MLS::Crypto::CipherSuite.new(thv['cipher_suite'])

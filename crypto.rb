@@ -24,13 +24,31 @@ class MLS::Crypto
       end
     end
 
-    module P256
+    module X448
+      def self.deserialize_public_encapsulation_key(raw)
+        OpenSSL::PKey.new_raw_public_key('X448', raw)
+      end
+
+      def self.deserialize_private_encapsulation_key(raw)
+        OpenSSL::PKey.new_raw_private_key('X448', raw)
+      end
+
+      def self.deserialize_public_signing_key(raw)
+        OpenSSL::PKey.new_raw_public_key('ED448', raw)
+      end
+
+      def self.deserialize_private_signing_key(raw)
+        OpenSSL::PKey.new_raw_private_key('ED448', raw)
+      end
+    end
+
+    class EC
       # also would like to depend on HPKE gem...
       def self.deserialize_private_key(secret)
         asn1_seq = OpenSSL::ASN1.Sequence([
           OpenSSL::ASN1.Integer(1),
           OpenSSL::ASN1.OctetString(secret),
-          OpenSSL::ASN1.ObjectId('prime256v1', 0, :EXPLICIT)
+          OpenSSL::ASN1.ObjectId(curve_name, 0, :EXPLICIT)
         ])
 
         OpenSSL::PKey.read(asn1_seq.to_der)
@@ -40,7 +58,7 @@ class MLS::Crypto
         asn1_seq = OpenSSL::ASN1.Sequence([
           OpenSSL::ASN1.Sequence([
             OpenSSL::ASN1.ObjectId("id-ecPublicKey"),
-            OpenSSL::ASN1.ObjectId('prime256v1')
+            OpenSSL::ASN1.ObjectId(curve_name)
           ]),
           OpenSSL::ASN1.BitString(serialized_pk)
         ])
@@ -59,6 +77,24 @@ class MLS::Crypto
       end
       def self.deserialize_public_signing_key(raw)
         self.deserialize_public_key(raw)
+      end
+    end
+
+    class P256 < EC
+      def self.curve_name
+        'prime256v1'
+      end
+    end
+
+    class P384 < EC
+      def self.curve_name
+        'secp384r1'
+      end
+    end
+
+    class P521 < EC
+      def self.curve_name
+        'secp521r1'
       end
     end
 
@@ -83,6 +119,30 @@ class MLS::Crypto
         @hpke = HPKE.new(:x25519, :sha256, :sha256, :chacha20_poly1305)
         @kdf = @hpke.hkdf
         @pkey = MLS::Crypto::CipherSuite::X25519
+      when 4 # MLS_256_DHKEMX448_AES256GCM_SHA512_Ed448
+        @level = 256
+        @digest = OpenSSL::Digest.new('sha512')
+        @hpke = HPKE.new(:x448, :sha512, :sha512, :aes_256_gcm)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::X448
+      when 5 # MLS_256_DHKEMP521_AES256GCM_SHA512_P521
+        @level = 256
+        @digest = OpenSSL::Digest.new('sha512')
+        @hpke = HPKE.new(:p_521, :sha512, :sha512, :aes_256_gcm)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::P521
+      when 6 # MLS_256_DHKEMX448_CHACHA20POLY1305_SHA512_Ed448
+        @level = 256
+        @digest = OpenSSL::Digest.new('sha512')
+        @hpke = HPKE.new(:x448, :sha512, :sha512, :chacha20_poly1305)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::X448
+      when 7 # MLS_256_DHKEMP384_AES256GCM_SHA384_P384
+        @level = 256
+        @digest = OpenSSL::Digest.new('sha384')
+        @hpke = HPKE.new(:p_384, :sha384, :sha384, :aes_256_gcm)
+        @kdf = @hpke.hkdf
+        @pkey = MLS::Crypto::CipherSuite::P384
       end
     end
   end

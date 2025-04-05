@@ -10,7 +10,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-psk_vectors = JSON.parse(File.read('test_vectors/psk_secret.json')).select { _1['cipher_suite'] <= 3}
+psk_vectors = JSON.parse(File.read('test_vectors/psk_secret.json'))
 psk_vectors.each_with_index do |psk_vector, total_idx|
   suite = MLS::Crypto::CipherSuite.new(psk_vector['cipher_suite'])
   zero_vector = MLS::Crypto::Util.zero_vector(suite.kdf.n_h)
