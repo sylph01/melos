@@ -18,8 +18,8 @@ module MLS::SecretTree
     tree.array[index] = {
       'handshake_ratchet_secret' => MLS::Crypto.expand_with_label(suite, secret, "handshake",   "", suite.kdf.n_h),
       'application_ratchet_secret' => MLS::Crypto.expand_with_label(suite, secret, "application", "", suite.kdf.n_h),
-      'handshake_ratchet_secret_generation' => 0,
-      'application_ratchet_secret_generation' => 0
+      'next_handshake_ratchet_secret_generation' => 0,
+      'next_application_ratchet_secret_generation' => 0
     }
     unless MLS::Tree.leaf?(index)
       left_secret  = MLS::Crypto.expand_with_label(suite, secret, "tree", "left", suite.kdf.n_h)
@@ -29,14 +29,28 @@ module MLS::SecretTree
     end
   end
 
+  def self.ratchet_application_until(suite, tree, leaf_index, generation)
+    while (tree.leaf_at(leaf_index)['next_application_ratchet_secret_generation'] <= generation)
+      ratchet_application(suite, tree, leaf_index)
+    end
+  end
+
+  def self.ratchet_handshake_until(suite, tree, leaf_index, generation)
+    raise ArgumentError.new('cannot generate past generation') if generation < tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] - 1
+    # if current generation, do nothing
+    while (tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] <= generation)
+      ratchet_handshake(suite, tree, leaf_index)
+    end
+  end
+
   def self.ratchet_application(suite, tree, leaf_index)
     node_index = leaf_index * 2
-    generation = tree.array[node_index]['application_ratchet_secret_generation']
+    generation = tree.array[node_index]['next_application_ratchet_secret_generation']
     application_ratchet_secret = tree.array[node_index]['application_ratchet_secret']
     application_nonce = MLS::Crypto.derive_tree_secret(suite, application_ratchet_secret, "nonce", generation, suite.hpke.n_n)
     application_key   = MLS::Crypto.derive_tree_secret(suite, application_ratchet_secret, "key",   generation, suite.hpke.n_k)
     next_application_ratchet_secret = MLS::Crypto.derive_tree_secret(suite, application_ratchet_secret, "secret", generation, suite.kdf.n_h)
-    tree.array[node_index]['application_ratchet_secret_generation'] = generation + 1
+    tree.array[node_index]['next_application_ratchet_secret_generation'] = generation + 1
     tree.array[node_index]['application_ratchet_secret'] = next_application_ratchet_secret
     tree.array[node_index]['application_nonce'] = application_nonce
     tree.array[node_index]['application_key']   = application_key
@@ -44,12 +58,12 @@ module MLS::SecretTree
 
   def self.ratchet_handshake(suite, tree, leaf_index)
     node_index = leaf_index * 2
-    generation = tree.array[node_index]['handshake_ratchet_secret_generation']
+    generation = tree.array[node_index]['next_handshake_ratchet_secret_generation']
     handshake_ratchet_secret = tree.array[node_index]['handshake_ratchet_secret']
     handshake_nonce = MLS::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "nonce", generation, suite.hpke.n_n)
     handshake_key   = MLS::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "key",   generation, suite.hpke.n_k)
     next_handshake_ratchet_secret = MLS::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "secret", generation, suite.kdf.n_h)
-    tree.array[node_index]['handshake_ratchet_secret_generation'] = generation + 1
+    tree.array[node_index]['next_handshake_ratchet_secret_generation'] = generation + 1
     tree.array[node_index]['handshake_ratchet_secret'] = next_handshake_ratchet_secret
     tree.array[node_index]['handshake_nonce'] = handshake_nonce
     tree.array[node_index]['handshake_key']   = handshake_key

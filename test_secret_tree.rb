@@ -37,18 +37,14 @@ secret_tree_vectors.each do |stv|
   stv['leaves'].each_with_index do |array, leaf_index|
     # assumes that generation only goes up till 15
     puts "for leaf index #{leaf_index}:"
-    (0..15).each do |gen_num|
-      MLS::SecretTree.ratchet_application(suite, secret_tree, leaf_index)
-      MLS::SecretTree.ratchet_handshake(suite, secret_tree, leaf_index)
-      # check if there is a generation that matches
-      generation = array.find { _1['generation'] == gen_num}
-      if !generation.nil?
-        assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_key']), generation['handshake_key']
-        assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_nonce']), generation['handshake_nonce']
-        assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_key']), generation['application_key']
-        assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_nonce']), generation['application_nonce']
-        puts "[s] at generation #{generation['generation']}, handshake_(key/nonce), application_(key/nonce) matches"
-      end
+    array.each do |gen|
+      MLS::SecretTree.ratchet_application_until(suite, secret_tree, leaf_index, gen['generation'])
+      MLS::SecretTree.ratchet_handshake_until(suite, secret_tree, leaf_index, gen['generation'])
+      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_key']), gen['handshake_key']
+      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_nonce']), gen['handshake_nonce']
+      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_key']), gen['application_key']
+      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_nonce']), gen['application_nonce']
+      puts "[s] at generation #{gen['generation']}, handshake_(key/nonce), application_(key/nonce) matches"
     end
   end
 end
