@@ -617,6 +617,16 @@ class MLSStruct::FramedContentAuthData < MLSStruct::Base
       @signature.to_vec
     end
   end
+
+  def self.create(signature:, content_type:, confirmation_tag:)
+    instance = self.allocate
+    instance.instance_variable_set(:@signature, signature)
+    instance.instance_variable_set(:@content_type, content_type)
+    if content_type == 0x03
+      instance.instance_variable_set(:@confirmation_tag, confirmation_tag)
+    end
+    instance
+  end
 end
 
 class MLSStruct::FramedContent < MLSStruct::Base
@@ -707,6 +717,17 @@ class MLSStruct::AuthenticatedContent < MLSStruct::Base
     new_instance.instance_variable_set(:@auth, auth)
     new_instance
   end
+
+  # populate auth with values
+  def sign(suite, signature_private_key, group_context)
+    content_tbs = content.content_tbs(0x01, wire_format, group_context)
+    signature = MLS::Crypto.sign_with_label(suite, signature_private_key, "FramedContentTBS", content_tbs)
+    @auth = MLSStruct::FramedContentAuthData.create(
+      signature: signature,
+      content_type: content.content_type,
+      confirmation_tag: nil
+    )
+  end
 end
 
 ## 6.2
@@ -718,6 +739,16 @@ class MLSStruct::PublicMessage < MLSStruct::Base
     [:auth, :framed_content_auth_data],
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
+
+  def self.protect(authenticated_content, suite, membership_key, group_context)
+    message = self.allocate
+    message.instance_variable_set(:@content, authenticated_content.content)
+    message.instance_variable_set(:@auth, authenticated_content.auth)
+    if message.content.sender.sender_type == 0x01 # member
+      message.instance_variable_set(:@membership_tag, message.membership_mac(suite, membership_key, group_context))
+    end
+    message
+  end
 
   def unprotect(suite, membership_key, group_context)
     ## if sender type is member then membershipMac(suite, membership_key, group_context)

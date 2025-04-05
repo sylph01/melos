@@ -17,12 +17,14 @@ message_protection_vectors = JSON.parse(File.read('test_vectors/message-protecti
 message_protection_vectors.each do |mpv|
   suite = MLS::Crypto::CipherSuite.new(mpv['cipher_suite'])
   puts "for cipher suite ID #{mpv['cipher_suite']}:"
+  group_id = from_hex(mpv['group_id'])
+  epoch = mpv['epoch']
 
   ## Construct a GroupContext object with the provided cipher_suite, group_id, epoch, tree_hash, and confirmed_transcript_hash values, and empty extensions
   group_context = MLSStruct::GroupContext.create(
     cipher_suite: mpv['cipher_suite'],
-    group_id: from_hex(mpv['group_id']),
-    epoch: mpv['epoch'],
+    group_id: group_id,
+    epoch: epoch,
     tree_hash: from_hex(mpv['tree_hash']),
     confirmed_transcript_hash: from_hex(mpv['confirmed_transcript_hash']),
     extensions: []
@@ -53,7 +55,24 @@ message_protection_vectors.each do |mpv|
   puts "[s] produces the raw proposal"
 
   #### Verify that protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub
-  #### TODO
+  # create FramedContent
+  framed_content = MLSStruct::FramedContent.create(
+    group_id: group_id,
+    epoch: epoch,
+    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+    content_type: 0x02, # proposal
+    content: proposal
+  )
+  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+    wire_format: 0x01, # public_message
+    content: framed_content,
+    auth: nil
+  )
+  authenticated_content_2.sign(suite, signature_priv, group_context)
+  public_message_2 = MLSStruct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
+  authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
+  puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
