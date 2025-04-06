@@ -1,6 +1,7 @@
 require 'json'
 require 'minitest'
-require_relative 'structs.rb'
+require_relative 'structs'
+require_relative 'ratchet_tree'
 include Minitest::Assertions
 
 class << self
@@ -86,8 +87,8 @@ public_message_commit = MLSStruct::MLSMessage.new(from_hex(message_vector["publi
 assert_equal to_hex(public_message_commit.raw), message_vector["public_message_commit"]
 puts "[s] public_message_commit"
 
-ratchet_tree = MLSStruct::RatchetTree.parse(from_hex(message_vector["ratchet_tree"]))
-assert_equal to_hex(MLSStruct::RatchetTree.raw(ratchet_tree)), message_vector["ratchet_tree"]
+ratchet_tree = MLS::Struct::RatchetTree.parse(from_hex(message_vector["ratchet_tree"]))
+assert_equal to_hex(MLS::Struct::RatchetTree.raw(ratchet_tree)), message_vector["ratchet_tree"]
 puts "[s] ratchet_tree"
 
 puts
