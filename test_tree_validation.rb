@@ -24,7 +24,6 @@ vectors.each_with_index do |vec, tree_index|
   puts "[pass] Resolutions of each node of the tree matches"
 
   vec['tree_hashes'].each_with_index do |tree_hash, index|
-    puts "index #{index}:"
     assert_equal tree_hash, to_hex(MLS::Struct::RatchetTree.tree_hash(tree, index, suite))
   end
   puts "[pass] Tree hash calculation matches"
