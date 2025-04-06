@@ -96,4 +96,55 @@ module MLS::Struct::RatchetTree
     # it could totally be a ExpandWithLabel-ish thing...
     MLS::Crypto.hash(suite, tree_hash_input)
   end
+
+  def self.tree_hash_except(tree, node_index, unmerged_leaves, suite)
+    new_tree = tree.dup
+    unmerged_leaves.each do |leaf_index|
+      node_index_to_remove = leaf_index * 2
+      new_tree[node_index_to_remove] = nil
+    end
+
+    tree_hash(new_tree, node_index, suite)
+  end
+
+  def self.calculate_parent_hash(tree, node_index, sibling, suite)
+    parent_node = tree[node_index].parent_node
+    sibling_hash = tree_hash_except(tree, sibling, parent_node.unmerged_leaves, suite)
+    parent_hash_input = parent_node.encryption_key.to_vec + parent_node.parent_hash.to_vec + sibling_hash.to_vec
+    MLS::Crypto.hash(suite, parent_hash_input)
+  end
+
+  def self.verify_parent_hash_at(tree, node_index, suite)
+    node = tree[node_index]
+    if MLS::Tree.leaf?(node_index)
+      false # maybe an ArgumentError, because there is no verifying a ParentHash on a leaf node
+    else
+      if node.nil?
+        true
+      else
+        left_index  = MLS::Tree.left(node_index)
+        right_index = MLS::Tree.right(node_index)
+
+        # either the node at node_index is Parent-Hash Valid wrt someone in left tree or someone in right tree
+        has_parent_hash(tree, left_index, calculate_parent_hash(tree, node_index, right_index, suite)) || has_parent_hash(tree, right_index, calculate_parent_hash(tree, node_index, left_index, suite))
+      end
+    end
+  end
+
+  def self.has_parent_hash(tree, child_index, parent_hash_value)
+    resolutions = resolution(tree, child_index)
+    resolutions.each do |node_index|
+      if tree[node_index]&.parent_hash_in_node == parent_hash_value
+        # if any of the resolution of specified child has matching parent_hash_value then parent is Parent-Hash Valid wrt that child
+        return true
+      end
+    end
+    return false
+  end
+
+  def self.verify_parent_hash_of_tree(tree, suite)
+    parent_indexes = (1..((tree.count - 1) / 2)).map { _1 * 2 - 1} # this makes node_indexes of odd numbers
+    parent_indexes_from_bottom_to_top = parent_indexes.sort_by { MLS::Tree.level(_1) } # this sorts node_indexes based on level
+    parent_indexes_from_bottom_to_top.all? { verify_parent_hash_at(tree, _1, suite) } # this makes it so that nodes are evaluated from lower level to higher level
+  end
 end

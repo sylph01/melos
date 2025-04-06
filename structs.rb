@@ -571,6 +571,10 @@ class MLSStruct::Node < MLSStruct::Base
     [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLSStruct::LeafNode], # leaf
     [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLSStruct::ParentNode] # parent
   ]
+
+  def parent_hash_in_node
+    @leaf_node&.parent_hash || @parent_node.parent_hash
+  end
 end
 
 # Section 6.1

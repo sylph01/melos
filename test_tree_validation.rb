@@ -27,4 +27,7 @@ vectors.each_with_index do |vec, tree_index|
     assert_equal tree_hash, to_hex(MLS::Struct::RatchetTree.tree_hash(tree, index, suite))
   end
   puts "[pass] Tree hash calculation matches"
+
+  assert_equal true, MLS::Struct::RatchetTree.verify_parent_hash_of_tree(tree, suite)
+  puts "[pass] All parent nodes are parent-hash valid (a.k.a. can be chained back to a leaf node)"
 end
