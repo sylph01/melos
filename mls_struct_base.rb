@@ -23,7 +23,7 @@ class MLSStruct::Base
         buf += serialize_select_elem(value, elem[3])
       else
         value = self.instance_variable_get("@#{elem[0]}")
-        buf += serialize_elem(value, elem[1])
+        buf += serialize_elem(value, elem[1], elem[2])
       end
     end
     buf
@@ -92,8 +92,13 @@ class MLSStruct::Base
       buf = buf.byteslice(8..)
     when :vec
       value, buf = String.parse_vec(buf)
-    when :vecs
-      value, buf = MLSStruct::Base.vecs(buf)
+    when :vec_of_type
+      vec, buf = String.parse_vec(buf)
+      value = []
+      while (vec.bytesize > 0)
+        current_instance, vec = deserialize_elem(vec, type_param, nil)
+        value << current_instance
+      end
     when :class
       value, buf = type_param.send(:new_and_rest, buf)
     when :classes
@@ -125,7 +130,7 @@ class MLSStruct::Base
   end
 
   # take a name and type
-  def serialize_elem(value, type)
+  def serialize_elem(value, type, type_param)
     case type
     when :uint8
       [value].pack('C')
@@ -137,8 +142,8 @@ class MLSStruct::Base
       [value].pack('Q>')
     when :vec
       value.to_vec
-    when :vecs
-      value.map(&:to_vec).join.to_vec
+    when :vec_of_type
+      value.map { serialize_elem(_1, type_param, nil) }.join.to_vec
     when :class, :framed_content_auth_data
       value.raw
     when :classes
@@ -161,7 +166,7 @@ class MLSStruct::Base
     if value.nil?
       ''
     else
-      serialize_elem(value, type)
+      serialize_elem(value, type, nil)
     end
   end
 end

@@ -61,7 +61,7 @@ class MLSStruct::ParentNode < MLSStruct::Base
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
     [:parent_hash, :vec],
-    [:unmerged_leaves, :vec] # becomes a vec of uint32
+    [:unmerged_leaves, :vec_of_type, :uint32] # becomes a vec of uint32
   ]
 end
 
