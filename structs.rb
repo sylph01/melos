@@ -107,6 +107,30 @@ class MLSStruct::LeafNode < MLSStruct::Base
     [:extensions, :classes, MLSStruct::Extension],
     [:signature, :vec]
   ]
+
+  def leaf_node_tbs(group_id, leaf_index)
+    buf = ''
+    buf += encryption_key.to_vec
+    buf += signature_key.to_vec
+    buf += credential.raw
+    buf += capabilities.raw
+    buf += [leaf_node_source].pack('C')
+    if leaf_node_source == 0x01
+      buf += lifetime.raw
+    elsif leaf_node_source == 0x03
+      buf += parent_hash.to_vec
+    end
+    buf += extensions.map(&:raw).join.to_vec
+    if leaf_node_source == 0x02 || leaf_node_source == 0x03
+      buf += group_id.to_vec
+      buf += [leaf_index].pack('L>') # uint32
+    end
+    buf
+  end
+
+  def verify(suite, group_id, leaf_index)
+    MLS::Crypto.verify_with_label(suite, signature_key, "LeafNodeTBS", leaf_node_tbs(group_id, leaf_index), signature)
+  end
 end
 
 class MLSStruct::LeafNodeTBS < MLSStruct::Base
