@@ -3,6 +3,7 @@ require_relative 'mls_struct_base'
 require_relative 'structs'
 require_relative 'vec_base'
 require_relative 'tree'
+require_relative 'crypto'
 
 module MLS; end
 module MLS::Struct; end
@@ -62,5 +63,37 @@ module MLS::Struct::RatchetTree
         [node_index]
       end
     end
+  end
+
+  def self.tree_hash(tree, node_index, suite)
+    node = tree[node_index]
+    if MLS::Tree.leaf?(node_index)
+      # is a leaf node
+      leaf_index = node_index / 2
+      leaf_node_hash_input = [leaf_index].pack('L>')
+      if node.nil?
+        leaf_node_hash_input += [0].pack('C')
+      else
+        leaf_node_hash_input += [1].pack('C') + node.leaf_node.raw
+      end
+
+      tree_hash_input = [1].pack('C') + leaf_node_hash_input
+    else
+      # is a parent node, so calculate using ParentNodeHashInput
+      parent_node_hash_input = ''
+      if node.nil?
+        parent_node_hash_input += [0].pack('C')
+      else
+        parent_node_hash_input += [1].pack('C') + node.parent_node.raw
+      end
+      parent_node_hash_input += tree_hash(tree, MLS::Tree.left(node_index), suite).to_vec
+      parent_node_hash_input += tree_hash(tree, MLS::Tree.right(node_index), suite).to_vec
+
+      tree_hash_input = [2].pack('C') + parent_node_hash_input
+    end
+
+    # The RFC omits the actual definition of calculating a tree hash...
+    # it could totally be a ExpandWithLabel-ish thing...
+    MLS::Crypto.hash(suite, tree_hash_input)
   end
 end
