@@ -37,7 +37,13 @@ vectors.each do |vec|
     check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Add"
   elsif prop.update
-
+    proposal_sender = vec['proposal_sender']
+    # create node to update
+    node = MLSStruct::Node.new_leaf_node(prop.update.leaf_node)
+    MLS::Struct::RatchetTree.update_leaf_node(tree_before, node, proposal_sender)
+    # check tree equality
+    check_tree_equality(tree_before, tree_after)
+    puts "[pass] Application of Update"
   elsif prop.remove
 
   end

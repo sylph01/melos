@@ -174,8 +174,20 @@ module MLS::Struct::RatchetTree
     current_node_index = inserted_node_index
     while(current_node_index != MLS::Tree.root(tree.count))
       if tree[current_node_index] && tree[current_node_index].node_type == 0x02
-        puts "is a parent node"
         tree[current_node_index].parent_node.unmerged_leaves << inserted_leaf_index
+      end
+      current_node_index = MLS::Tree.parent(current_node_index, tree.count)
+    end
+  end
+
+  def self.update_leaf_node(tree, node_to_update, leaf_index_of_sender)
+    node_index = leaf_index_of_sender * 2
+    tree[node_index] = node_to_update
+    # blank the intermediate nodes along the path from sender's leaf to root
+    current_node_index = node_index
+    while(current_node_index != MLS::Tree.root(tree.count))
+      if tree[current_node_index] && tree[current_node_index].node_type == 0x02
+        tree[current_node_index] = nil
       end
       current_node_index = MLS::Tree.parent(current_node_index, tree.count)
     end
