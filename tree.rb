@@ -76,6 +76,10 @@ class MLS::Tree
   end
 
   class << self
+    def n_leaves(tree)
+      (tree.size + 1) / 2
+    end
+
     def log2(x)
       if x == 0
         return 0

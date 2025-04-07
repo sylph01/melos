@@ -147,4 +147,37 @@ module MLS::Struct::RatchetTree
     parent_indexes_from_bottom_to_top = parent_indexes.sort_by { MLS::Tree.level(_1) } # this sorts node_indexes based on level
     parent_indexes_from_bottom_to_top.all? { verify_parent_hash_at(tree, _1, suite) } # this makes it so that nodes are evaluated from lower level to higher level
   end
+
+  def self.add_leaf_node(tree, node_to_insert)
+    inserted = false
+    inserted_node_index = 0
+    # if there is a blank in tree, insert there
+    tree.each_with_index do |node, node_index|
+      if MLS::Tree.leaf?(node_index)
+        if tree[node_index].nil?
+          tree[node_index] = node_to_insert
+          inserted = true
+          inserted_node_index = node_index
+        end
+      else
+        # do nothing to a parent
+      end
+    end
+    # if not, extend tree
+    if !inserted
+      tree << nil
+      tree << node_to_insert
+      inserted_node_index = tree.count - 1
+    end
+    # then update unmerged list up till root
+    inserted_leaf_index = inserted_node_index / 2
+    current_node_index = inserted_node_index
+    while(current_node_index != MLS::Tree.root(tree.count))
+      if tree[current_node_index] && tree[current_node_index].node_type == 0x02
+        puts "is a parent node"
+        tree[current_node_index].parent_node.unmerged_leaves << inserted_leaf_index
+      end
+      current_node_index = MLS::Tree.parent(current_node_index, tree.count)
+    end
+  end
 end

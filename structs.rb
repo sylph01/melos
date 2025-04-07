@@ -599,6 +599,28 @@ class MLSStruct::Node < MLSStruct::Base
   def parent_hash_in_node
     @leaf_node&.parent_hash || @parent_node.parent_hash
   end
+
+  def self.new_leaf_node(leaf_node)
+    instance = self.allocate
+    instance.new_leaf_node_impl(leaf_node)
+    instance
+  end
+
+  def self.new_parent_node(parent_node)
+    instance = self.allocate
+    instance.new_parent_node_impl(parent_node)
+    instance
+  end
+
+  def new_leaf_node_impl(leaf_node)
+    @node_type = 0x01
+    @leaf_node = leaf_node
+  end
+
+  def new_parent_node_impl(parent_node)
+    @node_type = 0x02
+    @parent_node = parent_node
+  end
 end
 
 # Section 6.1
