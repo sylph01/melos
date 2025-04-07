@@ -54,9 +54,10 @@ vectors.each_with_index do |vector, tree_index|
       ## Set the private value at this node based on path_secret
       path_secret = ps['path_secret']
     end
-    # Verify that the resulting private state leaf_private[i] is consistent with the ratchet_tree,
-    # in the sense that for every node in the private state, the corresponding node in the tree is
-    # (a) not blank and (b) contains the public key corresponding to the private key in the private state.
-    assert_equal true, consistent?(private_treekem_state, ratchet_tree, suite)
   end
+  # Verify that the resulting private state leaf_private[i] is consistent with the ratchet_tree,
+  # in the sense that for every node in the private state, the corresponding node in the tree is
+  # (a) not blank and (b) contains the public key corresponding to the private key in the private state.
+  assert_equal true, consistent?(private_treekem_state, ratchet_tree, suite)
+  puts "[pass] Verify that the resulting private state leaf_private[i] is consistent with the ratchet_tree"
 end
