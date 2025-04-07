@@ -600,6 +600,10 @@ class MLSStruct::Node < MLSStruct::Base
     @leaf_node&.parent_hash || @parent_node.parent_hash
   end
 
+  def public_encryption_key
+    @leaf_node&.encryption_key || @parent_node&.encryption_key
+  end
+
   def self.new_leaf_node(leaf_node)
     instance = self.allocate
     instance.new_leaf_node_impl(leaf_node)

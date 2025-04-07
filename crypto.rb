@@ -266,4 +266,16 @@ class MLS::Crypto
     ciphertext_sample = ciphertext[0..(suite.kdf.n_h - 1)]
     expand_with_label(suite, sender_data_secret, "nonce", ciphertext_sample, suite.hpke.n_n)
   end
+
+  def self.encapsulation_key_pair_corresponds?(suite, private_key, public_key)
+    private_pkey = suite.pkey.deserialize_private_encapsulation_key(private_key)
+    public_pkey  = suite.pkey.deserialize_public_encapsulation_key(public_key)
+    if suite.pkey.equal?(MLS::Crypto::CipherSuite::X25519) || suite.pkey.equal?(MLS::Crypto::CipherSuite::X448)
+      # is an Edwards curve; check equality of the raw public key
+      private_pkey.raw_public_key == public_pkey.raw_public_key
+    else
+      # is a EC; check equality of the public key Point
+      private_pkey.public_key == public_pkey.public_key
+    end
+  end
 end
