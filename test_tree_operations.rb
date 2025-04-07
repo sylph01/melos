@@ -45,6 +45,9 @@ vectors.each do |vec|
     check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Update"
   elsif prop.remove
-
+    removed = prop.remove.removed
+    MLS::Struct::RatchetTree.remove_leaf_node(tree_before, removed)
+    check_tree_equality(tree_before, tree_after)
+    puts "[pass] Application of Remove"
   end
 end

@@ -110,8 +110,8 @@ class MLS::Tree
       end
     end
 
-    def root(n)
-      w = node_width(n)
+    def root(n_leaves)
+      w = node_width(n_leaves)
 
       (1 << log2(w)) - 1
     end
@@ -177,6 +177,16 @@ class MLS::Tree
 
     def leaf?(node_index)
       node_index % 2 == 0
+    end
+
+    def truncate!(tree)
+      last_node_index = tree.count - 1
+      root = root(n_leaves(tree))
+      if tree[(root + 1)..]&.all?(nil)
+        tree.slice!(root..) # keep left half of tree
+        truncate!(tree) # then attempt to truncate again
+      end
+      # right half of tree has an element, so finish
     end
 
     # def common_ancestor_direct(x, y)

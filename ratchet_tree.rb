@@ -192,4 +192,19 @@ module MLS::Struct::RatchetTree
       current_node_index = MLS::Tree.parent(current_node_index, tree.count)
     end
   end
+
+  def self.remove_leaf_node(tree, leaf_index_to_remove)
+    node_index = leaf_index_to_remove * 2
+    tree[node_index] = nil
+    # blank the intermediate nodes along the path from sender's leaf to root
+    current_node_index = node_index
+    while(current_node_index != MLS::Tree.root(tree.count))
+      if tree[current_node_index] && tree[current_node_index].node_type == 0x02
+        tree[current_node_index] = nil
+      end
+      current_node_index = MLS::Tree.parent(current_node_index, tree.count)
+    end
+    # then truncate tree
+    MLS::Tree.truncate!(tree)
+  end
 end
