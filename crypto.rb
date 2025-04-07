@@ -278,4 +278,9 @@ class MLS::Crypto
       private_pkey.public_key == public_pkey.public_key
     end
   end
+
+  def self.parent_hash(suite, encryption_key, ph_of_parent, sibling_hash)
+    parent_hash_input = encryption_key.to_vec + ph_of_parent.to_vec + sibling_hash.to_vec
+    MLS::Crypto.hash(suite, parent_hash_input)
+  end
 end

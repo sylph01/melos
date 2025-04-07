@@ -110,8 +110,7 @@ module MLS::Struct::RatchetTree
   def self.calculate_parent_hash(tree, node_index, sibling, suite)
     parent_node = tree[node_index].parent_node
     sibling_hash = tree_hash_except(tree, sibling, parent_node.unmerged_leaves, suite)
-    parent_hash_input = parent_node.encryption_key.to_vec + parent_node.parent_hash.to_vec + sibling_hash.to_vec
-    MLS::Crypto.hash(suite, parent_hash_input)
+    MLS::Crypto.parent_hash(suite, parent_node.encryption_key, parent_node.parent_hash, sibling_hash)
   end
 
   def self.verify_parent_hash_at(tree, node_index, suite)

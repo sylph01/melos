@@ -128,15 +128,15 @@ class MLS::Tree
       x ^ (0x03 << (k - 1))
     end
 
-    def parent(x, n)
-      raise ArgumentError.new('root node has no parent') if x == root(n)
+    def parent(x, n_leaves)
+      raise ArgumentError.new('root node has no parent') if x == root(n_leaves)
       k = level(x)
       b = (x >> (k +1)) & 0x01
       (x | (1 << k)) ^ (b << (k + 1))
     end
 
-    def sibling(x, n)
-      p = parent(x, n)
+    def sibling(x, n_leaves)
+      p = parent(x, n_leaves)
       if x < p
         right(p)
       else
@@ -144,24 +144,24 @@ class MLS::Tree
       end
     end
 
-    def direct_path(x, n)
-      r = root(n)
+    def direct_path(x, n_leaves)
+      r = root(n_leaves)
       return [] if x == r
       d = []
       while x != r
-        x = parent(x, n)
+        x = parent(x, n_leaves)
         d << x
       end
       return d
     end
 
-    def copath(x, n)
-      return [] if x == root(n)
-      d = direct_path(x)
-      d.insert(0, x)
+    def copath(x, n_leaves)
+      return [] if x == root(n_leaves)
+      d = direct_path(n_leaves)
+      d.insert(0, n_leaves)
       d.pop
 
-      d.map { sibling(_1, n) }
+      d.map { sibling(_1, n_leaves) }
     end
 
     def common_ancestor_semantic(x, y, n)
@@ -187,6 +187,12 @@ class MLS::Tree
         truncate!(tree) # then attempt to truncate again
       end
       # right half of tree has an element, so finish
+    end
+
+    def filtered_direct_path(tree, leaf_index)
+      node_index = leaf_index * 2
+      p direct_path(node_index, n_leaves(tree))
+      direct_path(node_index, n_leaves(tree)).map { tree[_1] && _1 }.compact
     end
 
     # def common_ancestor_direct(x, y)
