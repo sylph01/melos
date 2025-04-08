@@ -24,8 +24,14 @@ end
 
 vectors = JSON.load_file('test_vectors/tree-operations.json')
 vectors.each do |vec|
+  suite = MLS::Crypto::CipherSuite.new(vec['cipher_suite'])
   tree_before = MLS::Struct::RatchetTree.parse(from_hex(vec['tree_before']))
+  tree_hash_before = from_hex(vec['tree_hash_before'])
   tree_after  = MLS::Struct::RatchetTree.parse(from_hex(vec['tree_after']))
+  tree_hash_after = from_hex(vec['tree_hash_after'])
+
+  assert_equal MLS::Struct::RatchetTree.root_tree_hash(suite, tree_before), tree_hash_before
+  puts "[pass] Verify that the tree hash of tree_before matches tree_hash_before"
   prop = MLSStruct::Proposal.new(from_hex(vec['proposal']))
   if prop.add
     # validate key package
@@ -50,4 +56,7 @@ vectors.each do |vec|
     check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Remove"
   end
+
+  assert_equal MLS::Struct::RatchetTree.root_tree_hash(suite, tree_after), tree_hash_after
+  puts "[pass] Verify that the tree hash of candidate_tree_after matches tree_hash_after"
 end
