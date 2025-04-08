@@ -45,26 +45,6 @@ module MLS::Struct::RatchetTree
     buf.to_vec
   end
 
-  def self.resolution(tree, node_index)
-    node = tree[node_index]
-    if node.nil?
-      if MLS::Tree.leaf?(node_index)
-        # The resolution of a blank leaf node is the empty list.
-        []
-      else
-        # The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
-        resolution(tree, MLS::Tree.left(node_index)) + resolution(tree, MLS::Tree.right(node_index))
-      end
-    else
-      # The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
-      if node.parent_node
-        [node_index] + node.parent_node.unmerged_leaves.map { _1 * 2} # convert leaf index to node index
-      else
-        [node_index]
-      end
-    end
-  end
-
   def self.tree_hash(tree, node_index, suite)
     node = tree[node_index]
     if MLS::Tree.leaf?(node_index)
@@ -131,7 +111,7 @@ module MLS::Struct::RatchetTree
   end
 
   def self.has_parent_hash(tree, child_index, parent_hash_value)
-    resolutions = resolution(tree, child_index)
+    resolutions = MLS::Tree.resolution(tree, child_index)
     resolutions.each do |node_index|
       if tree[node_index]&.parent_hash_in_node == parent_hash_value
         # if any of the resolution of specified child has matching parent_hash_value then parent is Parent-Hash Valid wrt that child

@@ -204,7 +204,28 @@ class MLS::Tree
 
     def filtered_direct_path(tree, leaf_index)
       node_index = leaf_index * 2
-      direct_path(node_index, n_leaves(tree)).map { tree[_1] && _1 }.compact
+      n_l = n_leaves(tree)
+      direct_path(node_index, n_l).reject { resolution(tree, sibling_from_leaf(node_index, _1, n_l)) == [] }
+    end
+
+    def resolution(tree, node_index)
+      node = tree[node_index]
+      if node.nil?
+        if MLS::Tree.leaf?(node_index)
+          # The resolution of a blank leaf node is the empty list.
+          []
+        else
+          # The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
+          resolution(tree, MLS::Tree.left(node_index)) + resolution(tree, MLS::Tree.right(node_index))
+        end
+      else
+        # The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
+        if node.parent_node
+          [node_index] + node.parent_node.unmerged_leaves.map { _1 * 2} # convert leaf index to node index
+        else
+          [node_index]
+        end
+      end
     end
 
     # def common_ancestor_direct(x, y)
