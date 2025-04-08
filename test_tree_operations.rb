@@ -30,6 +30,7 @@ vectors.each do |vec|
   tree_after  = MLS::Struct::RatchetTree.parse(from_hex(vec['tree_after']))
   tree_hash_after = from_hex(vec['tree_hash_after'])
 
+  # Actually the test vectors page does not say that you verify the "root node's tree hash"...
   assert_equal MLS::Struct::RatchetTree.root_tree_hash(suite, tree_before), tree_hash_before
   puts "[pass] Verify that the tree hash of tree_before matches tree_hash_before"
   prop = MLSStruct::Proposal.new(from_hex(vec['proposal']))
