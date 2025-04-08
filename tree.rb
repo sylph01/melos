@@ -209,6 +209,12 @@ class MLS::Tree
       direct_path(node_index, n_l).reject { resolution(tree, sibling_from_leaf(node_index, _1, n_l)) == [] }
     end
 
+    def copath_nodes_of_filtered_direct_path(tree, leaf_index)
+      filtered_direct_path(tree, leaf_index).map do |a|
+        sibling_from_leaf(leaf_index * 2, a, n_leaves(tree))
+      end
+    end
+
     def resolution(tree, node_index)
       node = tree[node_index]
       if node.nil?
