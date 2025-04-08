@@ -246,4 +246,56 @@ module MLS::Struct::RatchetTree
 
     hashes
   end
+
+  def self.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context)
+    sender_node_index = sender_leaf_index * 2
+    receiver_node_index = receiver_leaf_index * 2
+
+    filtered_direct_path = MLS::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
+    # puts "filtered direct path: #{filtered_direct_path}"
+    raise ArgumentError.new('malformed update path') unless filtered_direct_path.count == update_path.nodes.count
+    overlap_node = MLS::Tree.overlap_with_filtered_direct_path(receiver_node_index, filtered_direct_path, MLS::Tree.n_leaves(ratchet_tree))
+    # puts "overlap node: #{overlap_node}"
+    overlap_index = filtered_direct_path.find_index { _1 == overlap_node}
+    # puts "overlap index: #{overlap_index}"
+    copath_node_index = MLS::Tree.copath_nodes_of_filtered_direct_path(ratchet_tree, sender_leaf_index)[overlap_index]
+    # puts "copath node: #{copath_node_index}"
+    resolution_of_copath_node = MLS::Tree.resolution(ratchet_tree, copath_node_index)
+    # puts "resolution: #{resolution_of_copath_node}"
+
+    priv_key = nil
+    priv_index = nil
+    resolution_of_copath_node.each_with_index do |res, idx|
+      if encryption_priv_tree[res]
+        priv_key = encryption_priv_tree[res]
+        priv_index = idx
+      end
+    end
+
+    target_update_path_node = update_path.nodes[overlap_index]
+    raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
+    target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
+    raise ArgumentError.new('priv key not found in tree') if priv_key.nil?
+    # puts "priv_key: #{to_hex priv_key}"
+
+    MLS::Crypto.decrypt_with_label(suite, priv_key, "UpdatePathNode", group_context.raw, target_encrypted_path_secret.kem_output, target_encrypted_path_secret.ciphertext)
+  end
+
+  def self.calculate_commit_secret(suite, ratchet_tree, update_path, sender_leaf_index, receiver_leaf_index, path_secret)
+    sender_node_index = sender_leaf_index * 2
+    receiver_node_index = receiver_leaf_index * 2
+
+    filtered_direct_path = MLS::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
+    raise ArgumentError.new('malformed update path') unless filtered_direct_path.count == update_path.nodes.count
+    overlap_node = MLS::Tree.overlap_with_filtered_direct_path(receiver_node_index, filtered_direct_path, MLS::Tree.n_leaves(ratchet_tree))
+    overlap_index = filtered_direct_path.find_index { _1 == overlap_node}
+
+    path_secret_n = path_secret
+    index = overlap_index
+    while filtered_direct_path[index] != MLS::Tree.root(MLS::Tree.n_leaves(ratchet_tree))
+      path_secret_n = MLS::Crypto.derive_secret(suite, path_secret_n, "path")
+      index += 1
+    end
+    MLS::Crypto.derive_secret(suite, path_secret_n, "path")
+  end
 end

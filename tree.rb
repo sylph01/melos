@@ -189,6 +189,17 @@ class MLS::Tree
       dxy.min { level(_1) }
     end
 
+    def overlap_with_filtered_direct_path(x, filtered_direct_path, n)
+      dx = Set.new([x]) | Set.new(direct_path(x, n))
+      df = Set.new(filtered_direct_path)
+      dxf = dx & df
+      if dxf.size == 0
+        raise ArgumentError.new('Failed to find overlap')
+      end
+
+      dxf.min { level(_1) }
+    end
+
     def leaf?(node_index)
       node_index % 2 == 0
     end
