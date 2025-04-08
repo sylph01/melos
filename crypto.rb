@@ -204,6 +204,17 @@ class MLS::Crypto
     expand_with_label(suite, secret, label, generation_in_uint32, length)
   end
 
+  def self.derive_key_pair(suite, secret)
+    pkey = suite.hpke.kem.derive_key_pair(secret)
+    if suite.pkey.equal?(MLS::Crypto::CipherSuite::X25519) || suite.pkey.equal?(MLS::Crypto::CipherSuite::X448)
+      # is an Edwards curve
+      [pkey.raw_private_key, pkey.raw_public_key]
+    else
+      # is an EC
+      [pkey.private_key.to_s(2), pkey.public_key.to_bn.to_s(2)]
+    end
+  end
+
   def self.seal_base(suite, pkr, info, aad, pt)
     context = suite.hpke.setup_base_s(pkr, info)
     enc = context[:enc]
@@ -274,7 +285,7 @@ class MLS::Crypto
       # is an Edwards curve; check equality of the raw public key
       private_pkey.raw_public_key == public_pkey.raw_public_key
     else
-      # is a EC; check equality of the public key Point
+      # is an EC; check equality of the public key Point
       private_pkey.public_key == public_pkey.public_key
     end
   end
