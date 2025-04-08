@@ -88,6 +88,7 @@ vectors.each_with_index do |vector, tree_index|
   # update paths
   vector['update_paths'].each do |up|
     sender = up['sender']
+    puts "For sender #{sender} (node: #{sender * 2})"
     update_path = MLSStruct::UpdatePath.new(from_hex(up['update_path']))
     commit_secret = from_hex(up['commit_secret'])
     tree_hash_after = from_hex(up['tree_hash_after'])
@@ -112,7 +113,6 @@ vectors.each_with_index do |vector, tree_index|
       extensions: []
     )
 
-    puts "sender #{sender} (node: #{sender * 2})"
     # puts "fdp: #{MLS::Tree.filtered_direct_path(new_tree, sender)}"
     # puts "copath_nodes: #{MLS::Tree.copath_nodes_of_filtered_direct_path(new_tree, sender)}"
     # p MLS::Tree.copath_nodes_of_filtered_direct_path(new_tree, sender).map { MLS::Tree.resolution(new_tree, _1) }
