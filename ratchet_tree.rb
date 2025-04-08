@@ -296,6 +296,6 @@ module MLS::Struct::RatchetTree
       path_secret_n = MLS::Crypto.derive_secret(suite, path_secret_n, "path")
       index += 1
     end
-    MLS::Crypto.derive_secret(suite, path_secret_n, "path")
+    MLS::Crypto.derive_secret(suite, path_secret_n, "path") # commit secret is node's path_secret +1
   end
 end
