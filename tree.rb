@@ -170,8 +170,9 @@ class MLS::Tree
 
     def copath(x, n_leaves)
       return [] if x == root(n_leaves)
-      d = direct_path(n_leaves)
-      d.insert(0, n_leaves)
+
+      d = direct_path(x, n_leaves)
+      d.insert(0, x)
       d.pop
 
       d.map { sibling(_1, n_leaves) }
