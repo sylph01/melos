@@ -197,7 +197,7 @@ module MLS::Struct::RatchetTree
     filtered_direct_path = MLS::Tree.filtered_direct_path(ratchet_tree, leaf_index)
     nodes_from_update_path = update_path.nodes
 
-    parent_hashes = calculate_parent_hashes(suite, ratchet_tree, leaf_index, update_path)
+    parent_hashes = calculate_parent_hashes(suite, ratchet_tree, leaf_index, update_path.nodes)
     # update parent nodes on path
     filtered_direct_path.each_with_index do |node_index, path_index|
       parent_node = MLSStruct::ParentNode.create(
@@ -213,10 +213,9 @@ module MLS::Struct::RatchetTree
     ratchet_tree[node_index_of_leaf] = node
   end
 
-  def self.calculate_parent_hashes(suite, ratchet_tree, leaf_index_from, update_path)
+  def self.calculate_parent_hashes(suite, ratchet_tree, leaf_index_from, update_path_nodes)
     hashes = []
     filtered_direct_path = MLS::Tree.filtered_direct_path(ratchet_tree, leaf_index_from)
-    nodes_from_update_path = update_path.nodes
     # count down from root, calculate parent hash
     calculated_parent_hash = ""
     # node_index = MLS::Tree.root(MLS::Tree.n_leaves(ratchet_tree))
@@ -227,7 +226,7 @@ module MLS::Struct::RatchetTree
       node_index = filtered_direct_path[path_index]
       leaf_node_index = leaf_index_from * 2
       sibling_node_index = MLS::Tree.sibling_from_leaf(leaf_node_index, node_index, MLS::Tree.n_leaves(ratchet_tree))
-      encryption_key = nodes_from_update_path[path_index].encryption_key
+      encryption_key = update_path_nodes[path_index].encryption_key
       sibling_node = ratchet_tree[sibling_node_index]
       # unmerged_leaves = sibling_node.parent_node ? sibling_node.parent_node.unmerged_leaves : []
       # unmerged_leaves = ratchet_tree[node_index].parent_node.unmerged_leaves
@@ -276,7 +275,7 @@ module MLS::Struct::RatchetTree
     raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
     target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
     raise ArgumentError.new('priv key not found in tree') if priv_key.nil?
-    # puts "priv_key: #{to_hex priv_key}"
+    pkey = suite.pkey.deserialize_private_encapsulation_key(priv_key)
 
     MLS::Crypto.decrypt_with_label(suite, priv_key, "UpdatePathNode", group_context.raw, target_encrypted_path_secret.kem_output, target_encrypted_path_secret.ciphertext)
   end

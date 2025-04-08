@@ -136,6 +136,27 @@ class MLSStruct::LeafNode < MLSStruct::Base
     buf
   end
 
+  def self.create(
+    encryption_key:, signature_key:, credential:, capabilities:,
+    leaf_node_source:, lifetime:, parent_hash:, extensions:, signature:
+  )
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@encryption_key, encryption_key)
+    new_instance.instance_variable_set(:@signature_key, signature_key)
+    new_instance.instance_variable_set(:@credential, credential)
+    new_instance.instance_variable_set(:@capabilities, capabilities)
+    new_instance.instance_variable_set(:@leaf_node_source, leaf_node_source)
+    new_instance.instance_variable_set(:@lifetime, lifetime)
+    new_instance.instance_variable_set(:@parent_hash, parent_hash)
+    new_instance.instance_variable_set(:@extensions, extensions)
+    new_instance.instance_variable_set(:@signature, signature)
+    new_instance
+  end
+
+  def sign(suite, signature_private_key, group_id, leaf_index)
+    @signature = MLS::Crypto.sign_with_label(suite, signature_private_key, "LeafNodeTBS", leaf_node_tbs(group_id, leaf_index))
+  end
+
   def verify(suite, group_id, leaf_index)
     MLS::Crypto.verify_with_label(suite, signature_key, "LeafNodeTBS", leaf_node_tbs(group_id, leaf_index), signature)
   end
@@ -222,6 +243,13 @@ class MLSStruct::HPKECipherText < MLSStruct::Base
     [:kem_output, :vec],
     [:ciphertext, :vec]
   ]
+
+  def self.create(kem_output:, ciphertext:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@kem_output, kem_output)
+    new_instance.instance_variable_set(:@ciphertext, ciphertext)
+    new_instance
+  end
 end
 
 class MLSStruct::UpdatePathNode < MLSStruct::Base
@@ -230,6 +258,13 @@ class MLSStruct::UpdatePathNode < MLSStruct::Base
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
     [:encrypted_path_secret, :classes, MLSStruct::HPKECipherText]
   ]
+
+  def self.create(encryption_key:, encrypted_path_secret:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@encryption_key, encryption_key)
+    new_instance.instance_variable_set(:@encrypted_path_secret, encrypted_path_secret)
+    new_instance
+  end
 end
 
 class MLSStruct::UpdatePath < MLSStruct::Base
@@ -238,6 +273,13 @@ class MLSStruct::UpdatePath < MLSStruct::Base
     [:leaf_node, :class, MLSStruct::LeafNode],
     [:nodes, :classes, MLSStruct::UpdatePathNode]
   ]
+
+  def self.create(leaf_node:, nodes:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@leaf_node, leaf_node)
+    new_instance.instance_variable_set(:@nodes, nodes)
+    new_instance
+  end
 end
 
 ## 7.8
