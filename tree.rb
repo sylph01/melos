@@ -144,6 +144,19 @@ class MLS::Tree
       end
     end
 
+    # used for determining sibling of a node from an UpdatePath
+    # i.e. the node (sibling) on the copath side
+    # takes two node indexes and the # of leaves
+    def sibling_from_leaf(x_of_leaf, x_of_ancestor, n_leaves)
+      dp = direct_path(x_of_leaf, n_leaves)
+      dp_including_self = [x_of_leaf] + dp
+      raise ArgumentError.new('specified node is not an ancestor of leaf') unless dp.include?(x_of_ancestor)
+      l = left(x_of_ancestor)
+      r = right(x_of_ancestor)
+      # if direct path (including self) includes left side, return right, else return left
+      dp_including_self.include?(l) ? r : l
+    end
+
     def direct_path(x, n_leaves)
       r = root(n_leaves)
       return [] if x == r
@@ -191,7 +204,6 @@ class MLS::Tree
 
     def filtered_direct_path(tree, leaf_index)
       node_index = leaf_index * 2
-      p direct_path(node_index, n_leaves(tree))
       direct_path(node_index, n_leaves(tree)).map { tree[_1] && _1 }.compact
     end
 
