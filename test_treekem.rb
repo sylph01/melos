@@ -26,33 +26,7 @@ end
 
 # maybe in RatchetTree class?
 def verify_parent_hash_of_path(suite, ratchet_tree, leaf_index_from, update_path)
-  filtered_direct_path = MLS::Tree.filtered_direct_path(ratchet_tree, leaf_index_from)
-  nodes_from_update_path = update_path.nodes
-  # count down from root, calculate parent hash
-  calculated_parent_hash = ""
-  # node_index = MLS::Tree.root(MLS::Tree.n_leaves(ratchet_tree))
-  # puts "fdp count: #{filtered_direct_path.count}"
-  # puts "update path count: #{nodes_from_update_path.count}"
-  (filtered_direct_path.count - 1).downto(0) do |path_index|
-    node_index = filtered_direct_path[path_index]
-    leaf_node_index = leaf_index_from * 2
-    sibling_node_index = MLS::Tree.sibling_from_leaf(leaf_node_index, node_index, MLS::Tree.n_leaves(ratchet_tree))
-    encryption_key = nodes_from_update_path[path_index].encryption_key
-    sibling_node = ratchet_tree[sibling_node_index]
-    # unmerged_leaves = sibling_node.parent_node ? sibling_node.parent_node.unmerged_leaves : []
-    # unmerged_leaves = ratchet_tree[node_index].parent_node.unmerged_leaves
-    # sibling_hash = MLS::Struct::RatchetTree.tree_hash_except(ratchet_tree, sibling_node_index, unmerged_leaves, suite)
-    sibling_hash = MLS::Struct::RatchetTree.tree_hash(ratchet_tree, sibling_node_index, suite)
-    calculated_parent_hash = MLS::Crypto.parent_hash(suite, encryption_key, calculated_parent_hash, sibling_hash)
-    # p ratchet_tree[node_index]
-    # puts "from: #{leaf_index_from}"
-    # puts "node: #{node_index}"
-    # puts "sibling: #{sibling_node_index}"
-    # puts "sh: #{to_hex sibling_hash}"
-    # puts "sh_w/o_unmerged: #{to_hex MLS::Struct::RatchetTree.tree_hash(ratchet_tree, sibling_node_index, suite)}"
-    # puts "calc: #{to_hex calculated_parent_hash}"
-  end
-
+  calculated_parent_hash = MLS::Struct::RatchetTree.calculate_parent_hashes(suite, ratchet_tree, leaf_index_from, update_path)[0]
   update_path.leaf_node.parent_hash == calculated_parent_hash
 end
 
@@ -118,9 +92,15 @@ vectors.each_with_index do |vector, tree_index|
     tree_hash_after = from_hex(up['tree_hash_after'])
 
     ## Verify that update_path is parent-hash valid relative to ratchet tree
-    # update_path
     # puts "sender: #{sender}"
     assert_equal true, verify_parent_hash_of_path(suite, ratchet_tree, sender, update_path)
+    puts "[pass] Verify that update_path is parent-hash valid relative to ratchet tree"
+
+    # Compute the ratchet tree that results from merging update_path into ratchet_tree, and verify that its root tree hash is equal to .tree_hash_after
+    new_tree = MLS::Struct::RatchetTree.parse(from_hex(vector['ratchet_tree']))
+    MLS::Struct::RatchetTree.merge_update_path(suite, new_tree, sender, update_path)
+    assert_equal tree_hash_after, MLS::Struct::RatchetTree.root_tree_hash(suite, new_tree)
+    puts "[pass] Compute the ratchet tree that results from merging update_path into ratchet_tree, and verify that its root tree hash is equal to .tree_hash_after"
   end
-  puts "[pass] Verify that update_path is parent-hash valid relative to ratchet tree"
+
 end

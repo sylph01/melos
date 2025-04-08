@@ -63,6 +63,14 @@ class MLSStruct::ParentNode < MLSStruct::Base
     [:parent_hash, :vec],
     [:unmerged_leaves, :vec_of_type, :uint32] # becomes a vec of uint32
   ]
+
+  def self.create(encryption_key:, parent_hash:, unmerged_leaves:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@encryption_key, encryption_key)
+    new_instance.instance_variable_set(:@parent_hash, parent_hash)
+    new_instance.instance_variable_set(:@unmerged_leaves, unmerged_leaves)
+    new_instance
+  end
 end
 
 ## 7.2
