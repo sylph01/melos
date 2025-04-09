@@ -24,7 +24,7 @@ module MLS::Struct::RatchetTree
       when 0
         array << nil
       when 1
-        node, buf = MLSStruct::Node.new_and_rest(buf)
+        node, buf = MLS::Struct::Node.new_and_rest(buf)
         array << node
       end
     end
@@ -200,16 +200,16 @@ module MLS::Struct::RatchetTree
     parent_hashes = calculate_parent_hashes(suite, ratchet_tree, leaf_index, update_path.nodes)
     # update parent nodes on path
     filtered_direct_path.each_with_index do |node_index, path_index|
-      parent_node = MLSStruct::ParentNode.create(
+      parent_node = MLS::Struct::ParentNode.create(
         encryption_key: nodes_from_update_path[path_index].encryption_key,
         parent_hash: parent_hashes[path_index + 1],
         unmerged_leaves: []
       )
-      node = MLSStruct::Node.new_parent_node(parent_node)
+      node = MLS::Struct::Node.new_parent_node(parent_node)
       ratchet_tree[node_index] = node
     end
     # update leaf
-    node = MLSStruct::Node.new_leaf_node(update_path.leaf_node)
+    node = MLS::Struct::Node.new_leaf_node(update_path.leaf_node)
     ratchet_tree[node_index_of_leaf] = node
   end
 

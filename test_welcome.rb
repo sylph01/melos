@@ -19,8 +19,8 @@ welcome_vectors.each do |wv|
   init_priv_raw  = from_hex(wv['init_priv'])
   signer_pub_raw = from_hex(wv['signer_pub'])
 
-  welcome = MLSStruct::MLSMessage.new(from_hex(wv['welcome']))
-  key_package = MLSStruct::MLSMessage.new(from_hex(wv['key_package']))
+  welcome = MLS::Struct::MLSMessage.new(from_hex(wv['welcome']))
+  key_package = MLS::Struct::MLSMessage.new(from_hex(wv['key_package']))
 
   ## Identify the entry in welcome.secrets corresponding to key_package
   key_package_ref = key_package.key_package.ref(suite)
@@ -42,7 +42,7 @@ welcome_vectors.each do |wv|
     encrypted_group_secrets.kem_output,
     encrypted_group_secrets.ciphertext
   )
-  group_secrets = MLSStruct::GroupSecrets.new(decrypted_group_secrets)
+  group_secrets = MLS::Struct::GroupSecrets.new(decrypted_group_secrets)
   puts "[s] Decrypt the encrypted group secrets using init_priv"
 
   ## Decrypt the encrypted group info
@@ -61,7 +61,7 @@ welcome_vectors.each do |wv|
     "",
     encrypted_group_info
   )
-  group_info = MLSStruct::GroupInfo.new(decrypted_group_info)
+  group_info = MLS::Struct::GroupInfo.new(decrypted_group_info)
   puts "[s] Decrypt the encrypted group info"
 
   ## Verify the signature on the decrypted group info using signer_pub

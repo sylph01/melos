@@ -33,12 +33,12 @@ vectors.each do |vec|
   # Actually the test vectors page does not say that you verify the "root node's tree hash"...
   assert_equal MLS::Struct::RatchetTree.root_tree_hash(suite, tree_before), tree_hash_before
   puts "[pass] Verify that the tree hash of tree_before matches tree_hash_before"
-  prop = MLSStruct::Proposal.new(from_hex(vec['proposal']))
+  prop = MLS::Struct::Proposal.new(from_hex(vec['proposal']))
   if prop.add
     # validate key package
     # TODO
     # create node to add
-    node = MLSStruct::Node.new_leaf_node(prop.add.key_package.leaf_node)
+    node = MLS::Struct::Node.new_leaf_node(prop.add.key_package.leaf_node)
     MLS::Struct::RatchetTree.add_leaf_node(tree_before, node)
     # check tree equality
     check_tree_equality(tree_before, tree_after)
@@ -46,7 +46,7 @@ vectors.each do |vec|
   elsif prop.update
     proposal_sender = vec['proposal_sender']
     # create node to update
-    node = MLSStruct::Node.new_leaf_node(prop.update.leaf_node)
+    node = MLS::Struct::Node.new_leaf_node(prop.update.leaf_node)
     MLS::Struct::RatchetTree.update_leaf_node(tree_before, node, proposal_sender)
     # check tree equality
     check_tree_equality(tree_before, tree_after)

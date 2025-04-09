@@ -18,7 +18,7 @@ transcript_hash_vectors.each do |thv|
 
   confirmation_key = from_hex(thv['confirmation_key'])
   authenticated_content_val = from_hex(thv['authenticated_content'])
-  authenticated_content = MLSStruct::AuthenticatedContent.new(authenticated_content_val)
+  authenticated_content = MLS::Struct::AuthenticatedContent.new(authenticated_content_val)
 
   interim_transcript_hash = from_hex(thv['interim_transcript_hash_before'])
 

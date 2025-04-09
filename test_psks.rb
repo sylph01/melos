@@ -22,12 +22,12 @@ psk_vectors.each_with_index do |psk_vector, total_idx|
     psk_value = from_hex(psk['psk'])
     psk_nonce = from_hex(psk['psk_nonce'])
 
-    preshared_key_id = MLSStruct::PreSharedKeyID.create_external(
+    preshared_key_id = MLS::Struct::PreSharedKeyID.create_external(
       psk_id: psk_id,
       psk_nonce: psk_nonce
     )
 
-    psk_label = MLSStruct::PSKLabel.create(
+    psk_label = MLS::Struct::PSKLabel.create(
       id: preshared_key_id,
       index: idx,
       count: psk_vector['psks'].count

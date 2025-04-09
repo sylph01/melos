@@ -2,7 +2,7 @@ require_relative 'vec_base.rb'
 require_relative 'mls_struct_base.rb'
 require 'securerandom'
 
-class MLSStruct::EncryptContext < MLSStruct::Base
+class MLS::Struct::EncryptContext < MLS::Struct::Base
   attr_reader :label, :context
   STRUCT = [
     [:label, :vec],
@@ -10,7 +10,7 @@ class MLSStruct::EncryptContext < MLSStruct::Base
   ]
 end
 
-class MLSStruct::RefHashInput < MLSStruct::Base
+class MLS::Struct::RefHashInput < MLS::Struct::Base
   attr_reader :label, :value
   STRUCT = [
     [:label, :vec],
@@ -19,25 +19,25 @@ class MLSStruct::RefHashInput < MLSStruct::Base
 end
 
 # Section 5.3 Credentials
-class MLSStruct::Certificate < MLSStruct::Base
+class MLS::Struct::Certificate < MLS::Struct::Base
   attr_reader :cert_data
   STRUCT = [
     [:cert_data, :vec]
   ]
 end
 
-class MLSStruct::Credential < MLSStruct::Base
+class MLS::Struct::Credential < MLS::Struct::Base
   attr_reader :credential_type, :identity, :certificates
   STRUCT = [
     [:credential_type, :uint16],
     [:identity,     :select, ->(ctx){ctx[:credential_type] == 0x0001}, :vec], # 0x0001 = basic
-    [:certificates, :select, ->(ctx){ctx[:credential_type] == 0x0002}, :classes, MLSStruct::Certificate] #0x0002 = x509
+    [:certificates, :select, ->(ctx){ctx[:credential_type] == 0x0002}, :classes, MLS::Struct::Certificate] #0x0002 = x509
   ]
 end
 
 ## 6.3.2
 
-class MLSStruct::SenderData < MLSStruct::Base
+class MLS::Struct::SenderData < MLS::Struct::Base
   attr_reader :leaf_index, :generation, :reuse_guard
   STRUCT = [
     [:leaf_index, :uint32],
@@ -56,7 +56,7 @@ end
 
 ## 7.1
 
-class MLSStruct::ParentNode < MLSStruct::Base
+class MLS::Struct::ParentNode < MLS::Struct::Base
   attr_reader :encryption_key, :parent_hash, :unmerged_leaves
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
@@ -75,7 +75,7 @@ end
 
 ## 7.2
 
-class MLSStruct::Capabilities < MLSStruct::Base
+class MLS::Struct::Capabilities < MLS::Struct::Base
   attr_reader :versions, :cipher_suites, :extensions, :proposals, :credentials
   STRUCT = [
     [:versions, :vec],      # vec of ProtocolVersion (uint16)
@@ -86,7 +86,7 @@ class MLSStruct::Capabilities < MLSStruct::Base
   ]
 end
 
-class MLSStruct::Lifetime < MLSStruct::Base
+class MLS::Struct::Lifetime < MLS::Struct::Base
   attr_reader :not_before, :not_after
   STRUCT = [
     [:not_before, :uint64],
@@ -94,7 +94,7 @@ class MLSStruct::Lifetime < MLSStruct::Base
   ]
 end
 
-class MLSStruct::Extension < MLSStruct::Base
+class MLS::Struct::Extension < MLS::Struct::Base
   attr_reader :extension_type, :extension_data
   STRUCT = [
     [:extension_type, :uint16], # ExtensionType = uint16
@@ -102,17 +102,17 @@ class MLSStruct::Extension < MLSStruct::Base
   ]
 end
 
-class MLSStruct::LeafNode < MLSStruct::Base
+class MLS::Struct::LeafNode < MLS::Struct::Base
   attr_reader :encryption_key, :signature_key, :credential, :capabilities, :leaf_node_source, :lifetime, :parent_hash, :extensions, :signature
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
     [:signature_key, :vec],  # SignaturePublicKey = opaque <V>
-    [:credential, :class, MLSStruct::Credential],
-    [:capabilities, :class, MLSStruct::Capabilities],
+    [:credential, :class, MLS::Struct::Credential],
+    [:capabilities, :class, MLS::Struct::Capabilities],
     [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
-    [:lifetime, :select,    ->(ctx){ctx[:leaf_node_source] == 0x01}, :class, MLSStruct::Lifetime], # key_package
+    [:lifetime, :select,    ->(ctx){ctx[:leaf_node_source] == 0x01}, :class, MLS::Struct::Lifetime], # key_package
     [:parent_hash, :select, ->(ctx){ctx[:leaf_node_source] == 0x03}, :vec],                        # commit
-    [:extensions, :classes, MLSStruct::Extension],
+    [:extensions, :classes, MLS::Struct::Extension],
     [:signature, :vec]
   ]
 
@@ -162,13 +162,13 @@ class MLSStruct::LeafNode < MLSStruct::Base
   end
 end
 
-class MLSStruct::LeafNodeTBS < MLSStruct::Base
+class MLS::Struct::LeafNodeTBS < MLS::Struct::Base
   attr_reader :encryption_key, :signature_key, :credential, :capabilities, :leaf_node_source, :lifetime, :parent_hash, :extensions, :group_id, :leaf_index
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
     [:signature_key, :vec],  # SignaturePublicKey = opaque <V>
-    [:credential, :class, MLSStruct::Credential],
-    [:capabilities, :class, MLSStruct::Capabilities],
+    [:credential, :class, MLS::Struct::Credential],
+    [:capabilities, :class, MLS::Struct::Capabilities],
     [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
     [:select_leaf_node_source, :custom],
     [:extensions, :vec],
@@ -180,7 +180,7 @@ class MLSStruct::LeafNodeTBS < MLSStruct::Base
     returns = []
     case context[:leaf_node_source]
     when 0x01 # key_package
-      lifetime, buf = MLSStruct::Lifetime.new_and_rest(buf)
+      lifetime, buf = MLS::Struct::Lifetime.new_and_rest(buf)
       returns << [:lifetime, lifetime]
     when 0x02 # update
       # add an empty struct, aka nothing
@@ -237,7 +237,7 @@ end
 
 ## 7.6
 
-class MLSStruct::HPKECipherText < MLSStruct::Base
+class MLS::Struct::HPKECipherText < MLS::Struct::Base
   attr_reader :kem_output, :ciphertext
   STRUCT = [
     [:kem_output, :vec],
@@ -252,11 +252,11 @@ class MLSStruct::HPKECipherText < MLSStruct::Base
   end
 end
 
-class MLSStruct::UpdatePathNode < MLSStruct::Base
+class MLS::Struct::UpdatePathNode < MLS::Struct::Base
   attr_reader :encryption_key, :encrypted_path_secret
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
-    [:encrypted_path_secret, :classes, MLSStruct::HPKECipherText]
+    [:encrypted_path_secret, :classes, MLS::Struct::HPKECipherText]
   ]
 
   def self.create(encryption_key:, encrypted_path_secret:)
@@ -267,11 +267,11 @@ class MLSStruct::UpdatePathNode < MLSStruct::Base
   end
 end
 
-class MLSStruct::UpdatePath < MLSStruct::Base
+class MLS::Struct::UpdatePath < MLS::Struct::Base
   attr_reader :leaf_node, :nodes
   STRUCT = [
-    [:leaf_node, :class, MLSStruct::LeafNode],
-    [:nodes, :classes, MLSStruct::UpdatePathNode]
+    [:leaf_node, :class, MLS::Struct::LeafNode],
+    [:nodes, :classes, MLS::Struct::UpdatePathNode]
   ]
 
   def self.create(leaf_node:, nodes:)
@@ -286,18 +286,18 @@ end
 
 ## NodeType: uint8 enum
 
-class MLSStruct::LeafNodeHashInput < MLSStruct::Base
+class MLS::Struct::LeafNodeHashInput < MLS::Struct::Base
   attr_reader :leaf_index, :leaf_node
   STRUCT = [
     [:leaf_index, :uint32],
-    [:leaf_node, :optional, MLSStruct::LeafNode]
+    [:leaf_node, :optional, MLS::Struct::LeafNode]
   ]
 end
 
-class MLSStruct::ParentNodeHashInput < MLSStruct::Base
+class MLS::Struct::ParentNodeHashInput < MLS::Struct::Base
   attr_reader :parent_node, :left_hash, :right_hash
   STRUCT = [
-    [:parent_node, :optional, MLSStruct::ParentNode],
+    [:parent_node, :optional, MLS::Struct::ParentNode],
     [:left_hash, :vec],
     [:right_hash, :vec]
   ]
@@ -305,7 +305,7 @@ end
 
 ## 7.9
 
-class MLSStruct::ParentHashInput < MLSStruct::Base
+class MLS::Struct::ParentHashInput < MLS::Struct::Base
   attr_reader :encryption_key, :parent_hash, :original_sibling_tree_hash
   STRUCT = [
     [:encryption_key, :vec], # HPKEPublicKey
@@ -314,18 +314,18 @@ class MLSStruct::ParentHashInput < MLSStruct::Base
   ]
 end
 
-class MLSStruct::TreeHashInput < MLSStruct::Base
+class MLS::Struct::TreeHashInput < MLS::Struct::Base
   attr_reader :node_type, :leaf_node, :parent_node
   STRUCT = [
     [:node_type, :uint8],
-    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLSStruct::LeafNodeHashInput],   # key_package
-    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLSStruct::ParentNodeHashInput], # update
+    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLS::Struct::LeafNodeHashInput],   # key_package
+    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLS::Struct::ParentNodeHashInput], # update
   ]
 end
 
 ## 8
 
-class MLSStruct::KDFLabel < MLSStruct::Base
+class MLS::Struct::KDFLabel < MLS::Struct::Base
   attr_reader :length, :label, :context
   STRUCT = [
     [:length, :uint16],
@@ -336,7 +336,7 @@ end
 
 ## 8.1
 
-class MLSStruct::GroupContext < MLSStruct::Base
+class MLS::Struct::GroupContext < MLS::Struct::Base
   attr_reader :version, :cipher_suite, :group_id, :epoch, :tree_hash, :confirmed_transcript_hash, :extensions
   STRUCT = [
     [:version, :uint16],
@@ -345,7 +345,7 @@ class MLSStruct::GroupContext < MLSStruct::Base
     [:epoch, :uint64],
     [:tree_hash, :vec],
     [:confirmed_transcript_hash, :vec],
-    [:extensions, :classes, MLSStruct::Extension]
+    [:extensions, :classes, MLS::Struct::Extension]
   ]
 
   def self.create(cipher_suite:, group_id:, epoch:, tree_hash:, confirmed_transcript_hash:, extensions:)
@@ -363,7 +363,7 @@ end
 
 ## 8.4
 
-class MLSStruct::PreSharedKeyID < MLSStruct::Base
+class MLS::Struct::PreSharedKeyID < MLS::Struct::Base
   attr_reader :psktype, :psk_id, :psk_group_id, :psk_epoch, :psk_nonce
   STRUCT = [
     [:psktype, :uint8],
@@ -382,10 +382,10 @@ class MLSStruct::PreSharedKeyID < MLSStruct::Base
   end
 end
 
-class MLSStruct::PSKLabel < MLSStruct::Base
+class MLS::Struct::PSKLabel < MLS::Struct::Base
   attr_reader :id, :index, :count
   STRUCT = [
-    [:id, :class, MLSStruct::PreSharedKeyID],
+    [:id, :class, MLS::Struct::PreSharedKeyID],
     [:index, :uint16],
     [:count, :uint16]
   ]
@@ -401,14 +401,14 @@ end
 
 ## 10
 
-class MLSStruct::KeyPackage < MLSStruct::Base
+class MLS::Struct::KeyPackage < MLS::Struct::Base
   attr_reader :version, :cipher_suite, :init_key, :leaf_node, :extensions, :signature
   STRUCT = [
     [:version, :uint16],
     [:cipher_suite, :uint16],
     [:init_key, :vec], # HPKEPublicKey
-    [:leaf_node, :class, MLSStruct::LeafNode],
-    [:extensions, :classes, MLSStruct::Extension],
+    [:leaf_node, :class, MLS::Struct::LeafNode],
+    [:extensions, :classes, MLS::Struct::Extension],
     [:signature, :vec] # SignWithLabel(., "KeyPackageTBS", KeyPackageTBS)
   ]
 
@@ -417,20 +417,20 @@ class MLSStruct::KeyPackage < MLSStruct::Base
   end
 end
 
-class MLSStruct::KeyPackageTBS < MLSStruct::Base
+class MLS::Struct::KeyPackageTBS < MLS::Struct::Base
   attr_reader :version, :cipher_suite, :init_key, :leaf_node, :extensions
   STRUCT = [
     [:version, :uint16],
     [:cipher_suite, :uint16],
     [:init_key, :vec], # HPKEPublicKey
-    [:leaf_node, :class, MLSStruct::LeafNode],
-    [:extensions, :classes, MLSStruct::Extension]
+    [:leaf_node, :class, MLS::Struct::LeafNode],
+    [:extensions, :classes, MLS::Struct::Extension]
   ]
 end
 
 ## 11
 
-class MLSStruct::RequiredCapabilities < MLSStruct::Base
+class MLS::Struct::RequiredCapabilities < MLS::Struct::Base
   attr_reader :extension_types, :proposal_types, :credential_types
   STRUCT = [
     [:extension_types, :vec], # vec of uint16
@@ -443,81 +443,81 @@ end
 
 ## 12.1.1 - 12.1.7
 
-class MLSStruct::Add < MLSStruct::Base
+class MLS::Struct::Add < MLS::Struct::Base
   attr_reader :key_package
   STRUCT = [
-    [:key_package, :class, MLSStruct::KeyPackage]
+    [:key_package, :class, MLS::Struct::KeyPackage]
   ]
 end
 
-class MLSStruct::Update < MLSStruct::Base
+class MLS::Struct::Update < MLS::Struct::Base
   attr_reader :leaf_node
   STRUCT = [
-    [:leaf_node, :class, MLSStruct::LeafNode]
+    [:leaf_node, :class, MLS::Struct::LeafNode]
   ]
 end
 
-class MLSStruct::Remove < MLSStruct::Base
+class MLS::Struct::Remove < MLS::Struct::Base
   attr_reader :removed
   STRUCT = [
     [:removed, :uint32]
   ]
 end
 
-class MLSStruct::PreSharedKey < MLSStruct::Base
+class MLS::Struct::PreSharedKey < MLS::Struct::Base
   attr_reader :psk
   STRUCT = [
-    [:psk, :class, MLSStruct::PreSharedKeyID]
+    [:psk, :class, MLS::Struct::PreSharedKeyID]
   ]
 end
 
-class MLSStruct::ReInit < MLSStruct::Base
+class MLS::Struct::ReInit < MLS::Struct::Base
   attr_reader :group_id, :version, :cipher_suite, :extensions
   STRUCT = [
     [:group_id, :vec],
     [:version, :uint16],
     [:cipher_suite, :uint16],
-    [:extensions, :classes, MLSStruct::Extension]
+    [:extensions, :classes, MLS::Struct::Extension]
   ]
 end
 
-class MLSStruct::ExternalInit < MLSStruct::Base
+class MLS::Struct::ExternalInit < MLS::Struct::Base
   attr_reader :kem_output
   STRUCT = [
     [:kem_output, :vec]
   ]
 end
 
-class MLSStruct::GroupContextExtensions < MLSStruct::Base
+class MLS::Struct::GroupContextExtensions < MLS::Struct::Base
   attr_reader :extensions
   STRUCT = [
-    [:extensions, :classes, MLSStruct::Extension]
+    [:extensions, :classes, MLS::Struct::Extension]
   ]
 end
 
 ## 12.1.8.1
 
-class MLSStruct::ExternalSender < MLSStruct::Base
+class MLS::Struct::ExternalSender < MLS::Struct::Base
   attr_reader :signature_key, :credential
   STRUCT = [
     [:signature_key, :vec],
-    [:credential, :class, MLSStruct::Credential]
+    [:credential, :class, MLS::Struct::Credential]
   ]
 end
 
 ## 12.1
 
-class MLSStruct::Proposal < MLSStruct::Base
+class MLS::Struct::Proposal < MLS::Struct::Base
   attr_reader :proposal_type, :add, :update, :remove, :psk, :reinit, :external_init, :group_context_extensions
   STRUCT = [
     [:proposal_type, :uint16],
-    [:add, :select, ->(ctx){ctx[:proposal_type] == 0x01}, :class, MLSStruct::Add],
-    [:update, :select, ->(ctx){ctx[:proposal_type] == 0x02}, :class, MLSStruct::Update],
-    [:remove, :select, ->(ctx){ctx[:proposal_type] == 0x03}, :class, MLSStruct::Remove],
-    [:psk, :select, ->(ctx){ctx[:proposal_type] == 0x04}, :class, MLSStruct::PreSharedKey],
-    [:reinit, :select, ->(ctx){ctx[:proposal_type] == 0x05}, :class, MLSStruct::ReInit],
-    [:external_init, :select, ->(ctx){ctx[:proposal_type] == 0x06}, :class, MLSStruct::ExternalInit],
-    [:group_context_extensions, :select, ->(ctx){ctx[:proposal_type] == 0x07}, :class, MLSStruct::GroupContextExtensions],
+    [:add, :select, ->(ctx){ctx[:proposal_type] == 0x01}, :class, MLS::Struct::Add],
+    [:update, :select, ->(ctx){ctx[:proposal_type] == 0x02}, :class, MLS::Struct::Update],
+    [:remove, :select, ->(ctx){ctx[:proposal_type] == 0x03}, :class, MLS::Struct::Remove],
+    [:psk, :select, ->(ctx){ctx[:proposal_type] == 0x04}, :class, MLS::Struct::PreSharedKey],
+    [:reinit, :select, ->(ctx){ctx[:proposal_type] == 0x05}, :class, MLS::Struct::ReInit],
+    [:external_init, :select, ->(ctx){ctx[:proposal_type] == 0x06}, :class, MLS::Struct::ExternalInit],
+    [:group_context_extensions, :select, ->(ctx){ctx[:proposal_type] == 0x07}, :class, MLS::Struct::GroupContextExtensions],
   ]
 
   def proposal_content
@@ -527,37 +527,37 @@ end
 
 ## 12.4
 
-class MLSStruct::ProposalOrRef < MLSStruct::Base
+class MLS::Struct::ProposalOrRef < MLS::Struct::Base
   attr_reader :type, :proposal, :reference
   STRUCT = [
     [:type, :uint8],
-    [:proposal, :select,  ->(ctx){ctx[:type] == 0x01}, :class, MLSStruct::Proposal],
+    [:proposal, :select,  ->(ctx){ctx[:type] == 0x01}, :class, MLS::Struct::Proposal],
     [:reference, :select, ->(ctx){ctx[:type] == 0x02}, :vec] # ProposalRef is a HashReference, which is a :vec
   ]
 end
 
-class MLSStruct::Commit < MLSStruct::Base
+class MLS::Struct::Commit < MLS::Struct::Base
   attr_reader :proposals, :path
   STRUCT = [
-    [:proposals, :classes, MLSStruct::ProposalOrRef],
-    [:path, :optional, MLSStruct::UpdatePath]
+    [:proposals, :classes, MLS::Struct::ProposalOrRef],
+    [:path, :optional, MLS::Struct::UpdatePath]
   ]
 end
 
 ## 12.4.3
 
-class MLSStruct::GroupInfo < MLSStruct::Base
+class MLS::Struct::GroupInfo < MLS::Struct::Base
   attr_reader :group_context, :extensions, :confirmation_tag, :signer, :signature
   STRUCT = [
-    [:group_context, :class, MLSStruct::GroupContext],
-    [:extensions, :classes, MLSStruct::Extension],
+    [:group_context, :class, MLS::Struct::GroupContext],
+    [:extensions, :classes, MLS::Struct::Extension],
     [:confirmation_tag, :vec], # MAC = opaque <V>
     [:signer, :uint32],
     [:signature, :vec]
   ]
 
   def group_info_tbs
-    MLSStruct::GroupInfoTBS.create(
+    MLS::Struct::GroupInfoTBS.create(
       group_context:,
       extensions:,
       confirmation_tag:,
@@ -575,11 +575,11 @@ class MLSStruct::GroupInfo < MLSStruct::Base
 end
 
 
-class MLSStruct::GroupInfoTBS < MLSStruct::Base
+class MLS::Struct::GroupInfoTBS < MLS::Struct::Base
   attr_reader :group_context, :extensions, :confirmation_tag, :signer, :signature
   STRUCT = [
-    [:group_context, :class, MLSStruct::GroupContext],
-    [:extensions, :classes, MLSStruct::Extension],
+    [:group_context, :class, MLS::Struct::GroupContext],
+    [:extensions, :classes, MLS::Struct::Extension],
     [:confirmation_tag, :vec], # MAC = opaque <V>
     [:signer, :uint32]
   ]
@@ -596,54 +596,54 @@ end
 
 # 12.4.3.1
 
-class MLSStruct::PathSecret < MLSStruct::Base
+class MLS::Struct::PathSecret < MLS::Struct::Base
   attr_reader :path_secret
   STRUCT = [
     [:path_secret, :vec]
   ]
 end
 
-class MLSStruct::GroupSecrets < MLSStruct::Base
+class MLS::Struct::GroupSecrets < MLS::Struct::Base
   attr_reader :joiner_secret, :path_secret, :psks
   STRUCT = [
     [:joiner_secret, :vec],
-    [:path_secret, :optional, MLSStruct::PathSecret],
-    [:psks, :classes, MLSStruct::PreSharedKeyID]
+    [:path_secret, :optional, MLS::Struct::PathSecret],
+    [:psks, :classes, MLS::Struct::PreSharedKeyID]
   ]
 end
 
-class MLSStruct::EncryptedGroupSecrets < MLSStruct::Base
+class MLS::Struct::EncryptedGroupSecrets < MLS::Struct::Base
   attr_reader :new_member, :encrypted_group_secrets
   STRUCT = [
     [:new_member, :vec], # KeyPackageRef = opaque <V>
-    [:encrypted_group_secrets, :class, MLSStruct::HPKECipherText]
+    [:encrypted_group_secrets, :class, MLS::Struct::HPKECipherText]
   ]
 end
 
-class MLSStruct::Welcome < MLSStruct::Base
+class MLS::Struct::Welcome < MLS::Struct::Base
   attr_reader :cipher_suite, :secrets, :encrypted_group_info
   STRUCT = [
     [:cipher_suite, :uint16],
-    [:secrets, :classes, MLSStruct::EncryptedGroupSecrets],
+    [:secrets, :classes, MLS::Struct::EncryptedGroupSecrets],
     [:encrypted_group_info, :vec]
   ]
 end
 
 ## 12.4.3.2
 
-class MLSStruct::ExternalPub < MLSStruct::Base
+class MLS::Struct::ExternalPub < MLS::Struct::Base
   attr_reader :external_pub
   STRUCT = [
     [:external_pub, :vec] # HPKEPublicKey
   ]
 end
 
-class MLSStruct::Node < MLSStruct::Base
+class MLS::Struct::Node < MLS::Struct::Base
   attr_reader :node_type, :leaf_node, :parent_node
   STRUCT = [
     [:node_type, :uint8],
-    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLSStruct::LeafNode], # leaf
-    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLSStruct::ParentNode] # parent
+    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, MLS::Struct::LeafNode], # leaf
+    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, MLS::Struct::ParentNode] # parent
   ]
 
   def parent_hash_in_node
@@ -678,7 +678,7 @@ class MLSStruct::Node < MLSStruct::Base
 end
 
 # Section 6.1
-class MLSStruct::Sender < MLSStruct::Base
+class MLS::Struct::Sender < MLS::Struct::Base
   attr_reader :sender_type, :leaf_index, :sender_index
   STRUCT = [
     [:sender_type, :uint8],
@@ -701,7 +701,7 @@ class MLSStruct::Sender < MLSStruct::Base
   end
 end
 
-class MLSStruct::FramedContentAuthData < MLSStruct::Base
+class MLS::Struct::FramedContentAuthData < MLS::Struct::Base
   attr_reader :signature, :confirmation_tag, :content_type
 
   STRUCT = [
@@ -742,17 +742,17 @@ class MLSStruct::FramedContentAuthData < MLSStruct::Base
   end
 end
 
-class MLSStruct::FramedContent < MLSStruct::Base
+class MLS::Struct::FramedContent < MLS::Struct::Base
   attr_reader :group_id, :epoch, :sender, :authenticated_data, :content_type, :application_data, :proposal, :commit
   STRUCT = [
     [:group_id, :vec],
     [:epoch, :uint64],
-    [:sender, :class, MLSStruct::Sender],
+    [:sender, :class, MLS::Struct::Sender],
     [:authenticated_data, :vec],
     [:content_type, :uint8],
     [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec],
-    [:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLSStruct::Proposal],
-    [:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLSStruct::Commit]
+    [:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, MLS::Struct::Proposal],
+    [:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, MLS::Struct::Commit]
   ]
 
   def content_tbs(version, wire_format, group_context)
@@ -785,21 +785,21 @@ class MLSStruct::FramedContent < MLSStruct::Base
   end
 end
 
-class MLSStruct::FramedContentTBS < MLSStruct::Base
+class MLS::Struct::FramedContentTBS < MLS::Struct::Base
   attr_reader :version, :wire_format, :content, :context
   STRUCT = [
     [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
-    [:content, :class, MLSStruct::FramedContent],
-    [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, MLSStruct::GroupContext]
+    [:content, :class, MLS::Struct::FramedContent],
+    [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, MLS::Struct::GroupContext]
   ]
 end
 
-class MLSStruct::AuthenticatedContent < MLSStruct::Base
+class MLS::Struct::AuthenticatedContent < MLS::Struct::Base
   attr_reader :wire_format, :content, :auth
   STRUCT = [
     [:wire_format, :uint16],
-    [:content, :class, MLSStruct::FramedContent],
+    [:content, :class, MLS::Struct::FramedContent],
     [:auth, :framed_content_auth_data]
   ]
 
@@ -808,7 +808,7 @@ class MLSStruct::AuthenticatedContent < MLSStruct::Base
   end
 
   def confirmed_transcript_hash_input
-    MLSStruct::ConfirmedTranscriptHashInput.create(
+    MLS::Struct::ConfirmedTranscriptHashInput.create(
       wire_format: wire_format,
       content: content,
       signature: auth.signature
@@ -836,7 +836,7 @@ class MLSStruct::AuthenticatedContent < MLSStruct::Base
     raise ArgumentError.new('Application data cannot be sent as a PublicMessage') if wire_format == 0x01 && content.content_type == 0x01
     content_tbs = content.content_tbs(0x01, wire_format, group_context)
     signature = MLS::Crypto.sign_with_label(suite, signature_private_key, "FramedContentTBS", content_tbs)
-    @auth = MLSStruct::FramedContentAuthData.create(
+    @auth = MLS::Struct::FramedContentAuthData.create(
       signature: signature,
       content_type: content.content_type,
       confirmation_tag: nil
@@ -846,10 +846,10 @@ end
 
 ## 6.2
 
-class MLSStruct::PublicMessage < MLSStruct::Base
+class MLS::Struct::PublicMessage < MLS::Struct::Base
   attr_reader :content, :auth, :membership_tag
   STRUCT = [
-    [:content, :class, MLSStruct::FramedContent],
+    [:content, :class, MLS::Struct::FramedContent],
     [:auth, :framed_content_auth_data],
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
   ]
@@ -869,7 +869,7 @@ class MLSStruct::PublicMessage < MLSStruct::Base
     if (content.sender.sender_type == 0x01)
       return nil if membership_tag != membership_mac(suite, membership_key, group_context)
     end
-    MLSStruct::AuthenticatedContent.create(
+    MLS::Struct::AuthenticatedContent.create(
       wire_format: 0x01, # public_message
       content: content,
       auth: auth
@@ -884,7 +884,7 @@ end
 
 ## 6.3
 
-class MLSStruct::PrivateMessage < MLSStruct::Base
+class MLS::Struct::PrivateMessage < MLS::Struct::Base
   attr_reader :group_id, :epoch, :content_type, :authenticated_data, :encrypted_sender_data, :ciphertext
   STRUCT = [
     [:group_id, :vec],
@@ -937,7 +937,7 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
       authenticated_content.content.authenticated_data)
     private_message_content_ciphertext = MLS::Crypto.aead_encrypt(suite, key, new_nonce, aad, private_message_content_plain)
 
-    sender_data_plain = MLSStruct::SenderData.create(
+    sender_data_plain = MLS::Struct::SenderData.create(
       leaf_index: leaf_index,
       generation: generation,
       reuse_guard: reuse_guard
@@ -964,18 +964,18 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
     sender_data = decrypt_sender_data(suite, sender_data_secret)
     key, nonce, _ = MLS::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
-    pmc, _ = MLSStruct::PrivateMessageContent.new_and_rest_with_content_type(MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext), content_type)
+    pmc, _ = MLS::Struct::PrivateMessageContent.new_and_rest_with_content_type(MLS::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext), content_type)
 
-    fc = MLSStruct::FramedContent.create(
+    fc = MLS::Struct::FramedContent.create(
       group_id: group_id,
       epoch: epoch,
-      sender: MLSStruct::Sender.create_member(sender_data.leaf_index),
+      sender: MLS::Struct::Sender.create_member(sender_data.leaf_index),
       authenticated_data: authenticated_data,
       content_type: content_type,
       content: pmc.content
     )
 
-    MLSStruct::AuthenticatedContent.create(
+    MLS::Struct::AuthenticatedContent.create(
       wire_format: 0x0002, # private_message
       content: fc,
       auth: pmc.auth
@@ -986,7 +986,7 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
   def decrypt_sender_data(suite, sender_data_secret)
     sender_data_key   = MLS::Crypto.sender_data_key(suite, sender_data_secret, ciphertext)
     sender_data_nonce = MLS::Crypto.sender_data_nonce(suite, sender_data_secret, ciphertext)
-    MLSStruct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
+    MLS::Struct::SenderData.new(MLS::Crypto.aead_decrypt(suite, sender_data_key, sender_data_nonce, sender_data_aad, encrypted_sender_data))
   end
 
   def self.apply_nonce_reuse_guard(nonce, guard)
@@ -1017,7 +1017,7 @@ class MLSStruct::PrivateMessage < MLSStruct::Base
   end
 end
 
-class MLSStruct::PrivateMessageContent < MLSStruct::Base
+class MLS::Struct::PrivateMessageContent < MLS::Struct::Base
   attr_accessor :application_data, :proposal, :commit, :auth, :padding
   # bytes -> struct: decode the content and auth field, rest is padding
   # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
@@ -1031,13 +1031,13 @@ class MLSStruct::PrivateMessageContent < MLSStruct::Base
       value, buf = String.parse_vec(buf)
       context << [:application_data, value]
     when 0x02 # proposal
-      value, buf = MLSStruct::Proposal.new_and_rest(buf)
+      value, buf = MLS::Struct::Proposal.new_and_rest(buf)
       context << [:proposal, value]
     when 0x03 # commit
-      value, buf = MLSStruct::Commit.new_and_rest(buf)
+      value, buf = MLS::Struct::Commit.new_and_rest(buf)
       context << [:commit, value]
     end
-    fcad, buf = MLSStruct::FramedContentAuthData.new_and_rest_with_content_type(buf, content_type)
+    fcad, buf = MLS::Struct::FramedContentAuthData.new_and_rest_with_content_type(buf, content_type)
     context << [:auth, fcad]
     # assume rest is padding
     context << [:padding, buf]
@@ -1052,11 +1052,11 @@ end
 
 ## 8.2
 
-class MLSStruct::ConfirmedTranscriptHashInput < MLSStruct::Base
+class MLS::Struct::ConfirmedTranscriptHashInput < MLS::Struct::Base
   attr_accessor :wire_format, :content, :signature
   STRUCT = [
     [:wire_format, :uint16],
-    [:content, :class, MLSStruct::FramedContent], # with content_type == commit
+    [:content, :class, MLS::Struct::FramedContent], # with content_type == commit
     [:signature, :vec]
   ]
 
@@ -1069,23 +1069,23 @@ class MLSStruct::ConfirmedTranscriptHashInput < MLSStruct::Base
   end
 end
 
-class MLSStruct::InterimTranscriptHashInput < MLSStruct::Base
+class MLS::Struct::InterimTranscriptHashInput < MLS::Struct::Base
   attr_reader :confirmation_tag
   STRUCT = [
     [:confirmation_tag, :vec]
   ]
 end
 
-class MLSStruct::MLSMessage < MLSStruct::Base
+class MLS::Struct::MLSMessage < MLS::Struct::Base
   attr_accessor :version, :wire_format, :public_message, :private_message, :welcome, :group_info, :key_package
   STRUCT = [
     [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
-    [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, MLSStruct::PublicMessage],
-    [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, MLSStruct::PrivateMessage],
-    [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, MLSStruct::Welcome],
-    [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLSStruct::GroupInfo],
-    [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLSStruct::KeyPackage]
+    [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, MLS::Struct::PublicMessage],
+    [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, MLS::Struct::PrivateMessage],
+    [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, MLS::Struct::Welcome],
+    [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, MLS::Struct::GroupInfo],
+    [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, MLS::Struct::KeyPackage]
   ]
 
   def verify(suite, signer_public_key, group_context)

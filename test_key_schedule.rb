@@ -19,7 +19,7 @@ key_schedule_vectors.each do |key_schedule_vector|
 
   key_schedule_vector['epochs'].each_with_index do |epoch, n|
     commit_secret = from_hex(epoch['commit_secret'])
-    group_context = MLSStruct::GroupContext.create(
+    group_context = MLS::Struct::GroupContext.create(
       cipher_suite: key_schedule_vector['cipher_suite'],
       group_id: from_hex(key_schedule_vector['group_id']),
       epoch: n,

@@ -21,7 +21,7 @@ message_protection_vectors.each do |mpv|
   epoch = mpv['epoch']
 
   ## Construct a GroupContext object with the provided cipher_suite, group_id, epoch, tree_hash, and confirmed_transcript_hash values, and empty extensions
-  group_context = MLSStruct::GroupContext.create(
+  group_context = MLS::Struct::GroupContext.create(
     cipher_suite: mpv['cipher_suite'],
     group_id: group_id,
     epoch: epoch,
@@ -43,9 +43,9 @@ message_protection_vectors.each do |mpv|
   ## For each of proposal, commit and application:
   ### proposal
   puts "proposal:"
-  proposal = MLSStruct::Proposal.new(from_hex(mpv['proposal']))
-  proposal_pub = MLSStruct::MLSMessage.new(from_hex(mpv['proposal_pub']))
-  proposal_priv = MLSStruct::MLSMessage.new(from_hex(mpv['proposal_priv']))
+  proposal = MLS::Struct::Proposal.new(from_hex(mpv['proposal']))
+  proposal_pub = MLS::Struct::MLSMessage.new(from_hex(mpv['proposal_pub']))
+  proposal_priv = MLS::Struct::MLSMessage.new(from_hex(mpv['proposal_priv']))
 
   #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
   authenticated_content = proposal_pub.public_message.unprotect(suite, membership_key, group_context)
@@ -56,21 +56,21 @@ message_protection_vectors.each do |mpv|
 
   #### Verify that protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub
   # create FramedContent
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x02, # proposal
     content: proposal
   )
-  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_2 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x01, # public_message
     content: framed_content,
     auth: nil
   )
   authenticated_content_2.sign(suite, signature_priv, group_context)
-  public_message_2 = MLSStruct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
+  public_message_2 = MLS::Struct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
   authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
@@ -84,21 +84,21 @@ message_protection_vectors.each do |mpv|
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x02, # proposal
     content: proposal
   )
-  authenticated_content_4 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_4 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x02, # private_message
     content: framed_content,
     auth: nil
   )
   authenticated_content_4.sign(suite, signature_priv, group_context)
-  private_message_4 = MLSStruct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = MLS::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
@@ -108,9 +108,9 @@ message_protection_vectors.each do |mpv|
 
   ### commit
   puts "commit:"
-  commit = MLSStruct::Commit.new(from_hex(mpv['commit']))
-  commit_pub = MLSStruct::MLSMessage.new(from_hex(mpv['commit_pub']))
-  commit_priv = MLSStruct::MLSMessage.new(from_hex(mpv['commit_priv']))
+  commit = MLS::Struct::Commit.new(from_hex(mpv['commit']))
+  commit_pub = MLS::Struct::MLSMessage.new(from_hex(mpv['commit_pub']))
+  commit_priv = MLS::Struct::MLSMessage.new(from_hex(mpv['commit_priv']))
 
   #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
   authenticated_content = commit_pub.public_message.unprotect(suite, membership_key, group_context)
@@ -121,15 +121,15 @@ message_protection_vectors.each do |mpv|
 
   #### Verify that protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub
   # create FramedContent
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x03, # commit
     content: commit
   )
-  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_2 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x01, # public_message
     content: framed_content,
     auth: nil
@@ -141,7 +141,7 @@ message_protection_vectors.each do |mpv|
   ### and here we directly set it inside authenticated content...
   authenticated_content_2.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
 
-  public_message_2 = MLSStruct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
+  public_message_2 = MLS::Struct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
   authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
@@ -155,15 +155,15 @@ message_protection_vectors.each do |mpv|
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x03, # commit
     content: commit
   )
-  authenticated_content_4 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_4 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x02, # private_message
     content: framed_content,
     auth: nil
@@ -171,7 +171,7 @@ message_protection_vectors.each do |mpv|
   authenticated_content_4.sign(suite, signature_priv, group_context)
   ### and here we directly set it inside authenticated content...
   authenticated_content_4.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
-  private_message_4 = MLSStruct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = MLS::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
@@ -182,21 +182,21 @@ message_protection_vectors.each do |mpv|
   ### application
   puts "application:"
   application = from_hex(mpv['application'])
-  application_priv = MLSStruct::MLSMessage.new(from_hex(mpv['application_priv']))
+  application_priv = MLS::Struct::MLSMessage.new(from_hex(mpv['application_priv']))
 
   puts "[skip] Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data (pub does not exist)"
 
   ## verify that protecting application message fails
   # create FramedContent
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x01, # commit
     content: application
   )
-  authenticated_content_2 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_2 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x01, # public_message
     content: framed_content,
     auth: nil
@@ -216,21 +216,21 @@ message_protection_vectors.each do |mpv|
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
-  framed_content = MLSStruct::FramedContent.create(
+  framed_content = MLS::Struct::FramedContent.create(
     group_id: group_id,
     epoch: epoch,
-    sender: MLSStruct::Sender.create_member(1), # sender is leaf index 1
+    sender: MLS::Struct::Sender.create_member(1), # sender is leaf index 1
     authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
     content_type: 0x01, # application
     content: application
   )
-  authenticated_content_4 = MLSStruct::AuthenticatedContent.create(
+  authenticated_content_4 = MLS::Struct::AuthenticatedContent.create(
     wire_format: 0x02, # private_message
     content: framed_content,
     auth: nil
   )
   authenticated_content_4.sign(suite, signature_priv, group_context)
-  private_message_4 = MLSStruct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = MLS::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
   secret_tree = MLS::SecretTree.create(suite, 2, encryption_secret)

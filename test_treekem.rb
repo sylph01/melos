@@ -89,7 +89,7 @@ vectors.each_with_index do |vector, tree_index|
   vector['update_paths'].each do |up|
     sender = up['sender']
     puts "For sender #{sender} (node: #{sender * 2})"
-    update_path = MLSStruct::UpdatePath.new(from_hex(up['update_path']))
+    update_path = MLS::Struct::UpdatePath.new(from_hex(up['update_path']))
     commit_secret = from_hex(up['commit_secret'])
     tree_hash_after = from_hex(up['tree_hash_after'])
 
@@ -104,7 +104,7 @@ vectors.each_with_index do |vector, tree_index|
     assert_equal tree_hash_after, MLS::Struct::RatchetTree.root_tree_hash(suite, new_tree)
     puts "[pass] Compute the ratchet tree that results from merging update_path into ratchet_tree, and verify that its root tree hash is equal to .tree_hash_after"
 
-    group_context = MLSStruct::GroupContext.create(
+    group_context = MLS::Struct::GroupContext.create(
       cipher_suite: vector['cipher_suite'],
       group_id: group_id,
       epoch: epoch,
@@ -152,7 +152,7 @@ vectors.each_with_index do |vector, tree_index|
       path_secret = path_secrets[array_index]
       node_private_key, node_public_key = MLS::Crypto.derive_key_pair(suite, MLS::Crypto.derive_secret(suite, path_secret, "node"))
 
-      update_path_node = MLSStruct::UpdatePathNode.create(
+      update_path_node = MLS::Struct::UpdatePathNode.create(
         encryption_key: node_public_key,
         encrypted_path_secret: []
       )
@@ -162,7 +162,7 @@ vectors.each_with_index do |vector, tree_index|
     ph0 = parent_hashes.count == 0 ? "" : parent_hashes[0]
     leaf_private_key, leaf_public_key = MLS::Crypto.derive_key_pair(suite, MLS::Crypto.derive_secret(suite, leaf_secret, "node"))
     # create new leaf node to replace sender
-    new_leaf_node = MLSStruct::LeafNode.create(
+    new_leaf_node = MLS::Struct::LeafNode.create(
       encryption_key: leaf_public_key,
       signature_key: original_leaf_node.leaf_node.signature_key,
       credential: original_leaf_node.leaf_node.credential,
@@ -174,7 +174,7 @@ vectors.each_with_index do |vector, tree_index|
       signature: nil
     )
     new_leaf_node.sign(suite, signature_priv_tree[sender * 2], group_id, sender)
-    update_path = MLSStruct::UpdatePath.create(
+    update_path = MLS::Struct::UpdatePath.create(
       leaf_node: new_leaf_node,
       nodes: update_path_nodes
     )
@@ -199,19 +199,19 @@ vectors.each_with_index do |vector, tree_index|
         assert_equal true, MLS::Crypto.encapsulation_key_pair_corresponds?(suite, encryption_priv_tree[resolution_node_index], resolution_node_public_key)
 
         kem_output, ciphertext = MLS::Crypto.encrypt_with_label(suite, resolution_node_public_key, "UpdatePathNode", group_context.raw, path_secret)
-        hpke_ciphertext = MLSStruct::HPKECipherText.create(
+        hpke_ciphertext = MLS::Struct::HPKECipherText.create(
           kem_output: kem_output,
           ciphertext: ciphertext
         )
         ciphertexts << hpke_ciphertext
       end
-      update_path_node = MLSStruct::UpdatePathNode.create(
+      update_path_node = MLS::Struct::UpdatePathNode.create(
         encryption_key: node_public_key,
         encrypted_path_secret: ciphertexts
       )
       update_path_nodes << update_path_node
     end
-    new_update_path = MLSStruct::UpdatePath.create(
+    new_update_path = MLS::Struct::UpdatePath.create(
       leaf_node: another_new_tree[sender * 2].leaf_node,
       nodes: update_path_nodes
     )
