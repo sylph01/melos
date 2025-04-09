@@ -1,0 +1,3 @@
+class MLS::Constants
+
+end

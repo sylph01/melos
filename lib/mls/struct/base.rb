@@ -1,5 +1,3 @@
-module MLS; end
-
 module MLS::Struct; end
 
 class MLS::Struct::Base

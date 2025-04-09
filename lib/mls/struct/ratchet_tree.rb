@@ -5,9 +5,6 @@ require_relative 'vec_base'
 require_relative 'tree'
 require_relative 'crypto'
 
-module MLS; end
-module MLS::Struct; end
-
 module MLS::Struct::RatchetTree
   def self.parse(vec)
     array, _ = new_and_rest(vec)

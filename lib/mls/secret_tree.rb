@@ -1,8 +1,6 @@
 require_relative 'tree'
 require_relative 'crypto'
 
-module MLS; end
-
 module MLS::SecretTree
   def self.create(suite, n_leaves, encryption_secret)
     st = MLS::Tree.empty_tree(n_leaves)

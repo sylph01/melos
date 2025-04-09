@@ -1,5 +1,3 @@
-module MLS; end
-
 class MLS::Tree
   attr_accessor :array, :leaf_count
   # attr_reader @array

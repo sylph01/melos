@@ -1,8 +1,6 @@
 require 'openssl'
 require 'hpke'
-require_relative 'vec_base'
-
-module MLS; end
+require_relative 'vec'
 
 class MLS::Crypto
   class CipherSuite
