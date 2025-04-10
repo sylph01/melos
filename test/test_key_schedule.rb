@@ -1,8 +1,5 @@
 require 'json'
-require 'minitest'
-require_relative 'structs.rb'
-require_relative 'crypto'
-require_relative 'vec_base'
+require 'mls'
 include Minitest::Assertions
 
 class << self

@@ -1,6 +1,6 @@
 require 'json'
 require 'minitest'
-require_relative 'lib/mls'
+require 'mls'
 include Minitest::Assertions
 include MLS::Util
 

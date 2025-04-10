@@ -1,5 +1,5 @@
 require 'json'
-require_relative 'lib/mls'
+require 'mls'
 require 'minitest'
 include Minitest::Assertions
 
