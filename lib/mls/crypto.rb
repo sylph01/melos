@@ -172,7 +172,7 @@ class MLS::Crypto
   end
 
   def self.ref_hash(suite, label, value)
-    ref_hash_input = label.to_vec + value.to_vec
+    ref_hash_input = MLS::Vec.from_string(label) + MLS::Vec.from_string(value)
     suite.digest.digest(ref_hash_input)
   end
 
@@ -189,7 +189,7 @@ class MLS::Crypto
   end
 
   def self.expand_with_label(suite, secret, label, context, length)
-    kdf_label = [length].pack('S>') + ("MLS 1.0 " + label).to_vec + context.to_vec
+    kdf_label = [length].pack('S>') + MLS::Vec.from_string("MLS 1.0 " + label) + MLS::Vec.from_string(context)
     suite.kdf.expand(secret, kdf_label, length)
   end
 
@@ -227,26 +227,26 @@ class MLS::Crypto
   end
 
   def self.encrypt_with_label(suite, public_key, label, context, plaintext)
-    encrypt_context = ("MLS 1.0 " + label).to_vec + context.to_vec
+    encrypt_context = MLS::Vec.from_string("MLS 1.0 " + label) + MLS::Vec.from_string(context)
     pkey = suite.pkey.deserialize_public_encapsulation_key(public_key)
     seal_base(suite, pkey, encrypt_context, "", plaintext)
   end
 
   def self.decrypt_with_label(suite, private_key, label, context, kem_output, ciphertext)
-    encrypt_context = ("MLS 1.0 " + label).to_vec + context.to_vec
+    encrypt_context = MLS::Vec.from_string("MLS 1.0 " + label) + MLS::Vec.from_string(context)
     pkey = suite.pkey.deserialize_private_encapsulation_key(private_key)
     open_base(suite, kem_output, pkey, encrypt_context, "", ciphertext)
   end
 
   def self.sign_with_label(suite, signature_key, label, content)
     skey = suite.pkey.deserialize_private_signing_key(signature_key)
-    sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
+    sign_content = MLS::Vec.from_string("MLS 1.0 " + label) + MLS::Vec.from_string(content)
     skey.sign(suite.pkey.hash_algorithm, sign_content)
   end
 
   def self.verify_with_label(suite, verification_key, label, content, signature_value)
     vkey = suite.pkey.deserialize_public_signing_key(verification_key)
-    sign_content = ("MLS 1.0 " + label).to_vec + content.to_vec
+    sign_content = MLS::Vec.from_string("MLS 1.0 " + label) + MLS::Vec.from_string(content)
     vkey.verify(suite.pkey.hash_algorithm, signature_value, sign_content)
   end
 
@@ -289,7 +289,7 @@ class MLS::Crypto
   end
 
   def self.parent_hash(suite, encryption_key, ph_of_parent, sibling_hash)
-    parent_hash_input = encryption_key.to_vec + ph_of_parent.to_vec + sibling_hash.to_vec
+    parent_hash_input = MLS::Vec.from_string(encryption_key) + MLS::Vec.from_string(ph_of_parent) + MLS::Vec.from_string(sibling_hash)
     MLS::Crypto.hash(suite, parent_hash_input)
   end
 end

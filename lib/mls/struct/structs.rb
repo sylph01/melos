@@ -1,5 +1,5 @@
-require_relative 'vec_base.rb'
-require_relative 'mls_struct_base.rb'
+require_relative '../vec'
+require_relative 'base'
 require 'securerandom'
 
 class MLS::Struct::EncryptContext < MLS::Struct::Base
@@ -118,19 +118,19 @@ class MLS::Struct::LeafNode < MLS::Struct::Base
 
   def leaf_node_tbs(group_id, leaf_index)
     buf = ''
-    buf += encryption_key.to_vec
-    buf += signature_key.to_vec
+    buf += MLS::Vec.from_string(encryption_key)
+    buf += MLS::Vec.from_string(signature_key)
     buf += credential.raw
     buf += capabilities.raw
     buf += [leaf_node_source].pack('C')
     if leaf_node_source == 0x01
       buf += lifetime.raw
     elsif leaf_node_source == 0x03
-      buf += parent_hash.to_vec
+      buf += MLS::Vec.from_string(parent_hash)
     end
-    buf += extensions.map(&:raw).join.to_vec
+    buf += MLS::Vec.from_string(extensions.map(&:raw).join)
     if leaf_node_source == 0x02 || leaf_node_source == 0x03
-      buf += group_id.to_vec
+      buf += MLS::Vec.from_string(group_id)
       buf += [leaf_index].pack('L>') # uint32
     end
     buf
@@ -185,7 +185,7 @@ class MLS::Struct::LeafNodeTBS < MLS::Struct::Base
     when 0x02 # update
       # add an empty struct, aka nothing
     when 0x03 # commit
-      parent_hash, buf = String.parse_vec(buf)
+      parent_hash, buf = MLS::Vec.parse_vec(buf)
       returns << [:parent_hash, parent_hash]
     else
       # add nothing
@@ -199,7 +199,7 @@ class MLS::Struct::LeafNodeTBS < MLS::Struct::Base
     when 0x01 # key_package
       # add an empty struct, aka nothing
     when 0x02, 0x03 # update, commit
-      group_id, buf = String.parse_vec(buf)
+      group_id, buf = MLS::Vec.parse_vec(buf)
       returns << [:group_id, group_id]
       leaf_index = buf.byteslice(0, 4).unpack1('L>') # uint32
       buf = buf.byteslice(4..)
@@ -217,7 +217,7 @@ class MLS::Struct::LeafNodeTBS < MLS::Struct::Base
     when 0x02
       ''
     when 0x03
-      @parent_hash.to_vec
+      MLS::Vec.from_string(@parent_hash)
     else
       ''
     end
@@ -228,7 +228,7 @@ class MLS::Struct::LeafNodeTBS < MLS::Struct::Base
     when 0x01
       ''
     when 0x02, 0x03
-      @group_id.to_vec + [@leaf_index].pack('L>')
+      MLS::Vec.from_string(@group_id) + [@leaf_index].pack('L>')
     else
       ''
     end
@@ -715,7 +715,7 @@ class MLS::Struct::FramedContentAuthData < MLS::Struct::Base
     # custom part based on instance variable
     if content_type == 0x03 # commit
       # read MAC(opaque <V>) confirmation_tag
-      value, buf = String.parse_vec(buf)
+      value, buf = MLS::Vec.parse_vec(buf)
       context << [:confirmation_tag, value]
     end
     context << [:content_type, content_type]
@@ -725,9 +725,9 @@ class MLS::Struct::FramedContentAuthData < MLS::Struct::Base
 
   def raw
     if @content_type == 0x03
-      @signature.to_vec + @confirmation_tag.to_vec
+      MLS::Vec.from_string(@signature) + MLS::Vec.from_string(@confirmation_tag)
     else
-      @signature.to_vec
+      MLS::Vec.from_string(@signature)
     end
   end
 
@@ -911,7 +911,7 @@ class MLS::Struct::PrivateMessage < MLS::Struct::Base
   end
 
   def self.sender_data_aad_impl(gid, ep, ct)
-    gid.to_vec + [ep].pack('Q>') + [ct].pack('C')
+    MLS::Vec.from_string(gid) + [ep].pack('Q>') + [ct].pack('C')
   end
 
   def private_content_aad
@@ -919,7 +919,7 @@ class MLS::Struct::PrivateMessage < MLS::Struct::Base
   end
 
   def self.private_content_aad_impl(gid, ep, ct, ad)
-    gid.to_vec + [ep].pack('Q>') + [ct].pack('C') + ad.to_vec
+    MLS::Vec.from_string(gid) + [ep].pack('Q>') + [ct].pack('C') + MLS::Vec.from_string(ad)
   end
 
   def self.protect(authenticated_content, suite, secret_tree, sender_data_secret, padding_size)
@@ -1002,15 +1002,15 @@ class MLS::Struct::PrivateMessage < MLS::Struct::Base
     buf = ''
     case framed_content.content_type
     when 0x01 # application
-      buf += framed_content.application_data.to_vec
+      buf += MLS::Vec.from_string(framed_content.application_data)
     when 0x02 # proposal
       buf += framed_content.proposal.raw
     when 0x03 # commit
       buf += framed_content.commit.raw
     end
-    buf += framed_content_auth_data.signature.to_vec
+    buf += MLS::Vec.from_string(framed_content_auth_data.signature)
     if framed_content.content_type == 0x03 # commit
-      buf += framed_content_auth_data.confirmation_tag.to_vec
+      buf += MLS::Vec.from_string(framed_content_auth_data.confirmation_tag)
     end
     buf += MLS::Crypto::Util.zero_vector(padding_size)
     buf

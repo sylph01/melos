@@ -1,9 +1,9 @@
 ## Ratchet Tree Extension (12.4.3.3)
-require_relative 'mls_struct_base'
+require_relative 'base'
 require_relative 'structs'
-require_relative 'vec_base'
-require_relative 'tree'
-require_relative 'crypto'
+require_relative '../vec'
+require_relative '../tree'
+require_relative '../crypto'
 
 module MLS::Struct::RatchetTree
   def self.parse(vec)
@@ -13,7 +13,7 @@ module MLS::Struct::RatchetTree
 
   def self.new_and_rest(vec)
     array = []
-    buf, rest = String.parse_vec(vec)
+    buf, rest = MLS::Vec.parse_vec(vec)
     while buf.bytesize > 0
       presence = buf.byteslice(0, 1).unpack1('C')
       buf = buf.byteslice(1..)
@@ -39,7 +39,7 @@ module MLS::Struct::RatchetTree
       end
     end
 
-    buf.to_vec
+    MLS::Vec.from_string(buf)
   end
 
   def self.tree_hash(tree, node_index, suite)
@@ -63,8 +63,8 @@ module MLS::Struct::RatchetTree
       else
         parent_node_hash_input += [1].pack('C') + node.parent_node.raw
       end
-      parent_node_hash_input += tree_hash(tree, MLS::Tree.left(node_index), suite).to_vec
-      parent_node_hash_input += tree_hash(tree, MLS::Tree.right(node_index), suite).to_vec
+      parent_node_hash_input += MLS::Vec.from_string(tree_hash(tree, MLS::Tree.left(node_index), suite))
+      parent_node_hash_input += MLS::Vec.from_string(tree_hash(tree, MLS::Tree.right(node_index), suite))
 
       tree_hash_input = [2].pack('C') + parent_node_hash_input
     end

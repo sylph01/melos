@@ -38,7 +38,7 @@ transcript_hash_vectors.each do |thv|
   )
   ith_next = MLS::Crypto.hash(
     suite,
-    cth + authenticated_content.auth.confirmation_tag.to_vec
+    cth + MLS::Vec.from_string(authenticated_content.auth.confirmation_tag)
   )
 
   assert_equal to_hex(cth), thv['confirmed_transcript_hash_after']

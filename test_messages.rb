@@ -1,21 +1,13 @@
 require 'json'
 require 'minitest'
-require_relative 'structs'
-require_relative 'ratchet_tree'
+require_relative 'lib/mls'
 include Minitest::Assertions
+include MLS::Util
 
 class << self
 attr_accessor :assertions
 end
 self.assertions = 0
-
-def from_hex(hex)
-  [hex].pack('H*')
-end
-
-def to_hex(bin)
-  bin.unpack1('H*')
-end
 
 message_vectors = JSON.parse(File.read('test_vectors/messages.json'))[0..]
 

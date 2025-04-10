@@ -30,10 +30,10 @@ class MLS::Struct::Base
   end
 
   def self.vecs(buf)
-    value, buf = String.parse_vec(buf)
+    value, buf = MLS::Vec.parse_vec(buf)
     array = []
     while (value.bytesize > 0)
-      current_instance, value = String.parse_vec(value)
+      current_instance, value = MLS::Vec.parse_vec(value)
       array << current_instance
     end
     [array, buf]
@@ -91,9 +91,9 @@ class MLS::Struct::Base
       value = buf.byteslice(0, 8).unpack1('Q>')
       buf = buf.byteslice(8..)
     when :vec
-      value, buf = String.parse_vec(buf)
+      value, buf = MLS::Vec.parse_vec(buf)
     when :vec_of_type
-      vec, buf = String.parse_vec(buf)
+      vec, buf = MLS::Vec.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
         current_instance, vec = deserialize_elem(vec, type_param, nil)
@@ -104,7 +104,7 @@ class MLS::Struct::Base
     when :classes
       # prefix, length = buf.get_prefix_and_length
       # puts "#{prefix}, #{length}"
-      vec, buf = String.parse_vec(buf)
+      vec, buf = MLS::Vec.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
         current_instance, vec = type_param.send(:new_and_rest, vec)
@@ -141,13 +141,13 @@ class MLS::Struct::Base
     when :uint64
       [value].pack('Q>')
     when :vec
-      value.to_vec
+      MLS::Vec.from_string(value)
     when :vec_of_type
-      value.map { serialize_elem(_1, type_param, nil) }.join.to_vec
+      MLS::Vec.from_string(value.map { serialize_elem(_1, type_param, nil) }.join)
     when :class, :framed_content_auth_data
       value.raw
     when :classes
-      value.map(&:raw).join.to_vec
+      MLS::Vec.from_string(value.map(&:raw).join)
     when :optional
       if value.nil?
         [0].pack('C')
