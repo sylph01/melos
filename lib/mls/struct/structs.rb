@@ -1028,7 +1028,7 @@ class MLS::Struct::PrivateMessageContent < MLS::Struct::Base
     # deserialize application_data/proposal/commit
     case content_type
     when 0x01 # application
-      value, buf = String.parse_vec(buf)
+      value, buf = MLS::Vec.parse_vec(buf)
       context << [:application_data, value]
     when 0x02 # proposal
       value, buf = MLS::Struct::Proposal.new_and_rest(buf)
