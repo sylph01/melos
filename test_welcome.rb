@@ -1,9 +1,8 @@
 require 'json'
-require_relative 'crypto'
-require_relative 'vec_base'
-require_relative 'structs'
+require_relative 'lib/mls'
 require 'minitest'
 include Minitest::Assertions
+include MLS::Util
 
 class << self
 attr_accessor :assertions

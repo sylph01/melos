@@ -1,9 +1,8 @@
 require 'json'
 require 'minitest'
-require_relative 'ratchet_tree'
-require_relative 'vec_base'
-require_relative 'tree'
+require_relative 'lib/mls'
 include Minitest::Assertions
+include MLS::Util
 
 class << self
 attr_accessor :assertions
@@ -20,7 +19,7 @@ vectors.each_with_index do |vec, tree_index|
   group_id = from_hex(vec['tree'])
 
   vec['resolutions'].each_with_index do |resolution, index|
-    assert_equal resolution, MLS::Struct::RatchetTree.resolution(tree, index)
+    assert_equal resolution, MLS::Tree.resolution(tree, index)
   end
   puts "[pass] Resolutions of each node of the tree matches"
 
