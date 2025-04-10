@@ -1,6 +1,6 @@
-module MLS::Struct; end
+module Melos::Struct; end
 
-class MLS::Struct::Base
+class Melos::Struct::Base
   def initialize(buf)
     context, _ = deserialize(buf)
     set_instance_vars(context)
@@ -30,10 +30,10 @@ class MLS::Struct::Base
   end
 
   def self.vecs(buf)
-    value, buf = MLS::Vec.parse_vec(buf)
+    value, buf = Melos::Vec.parse_vec(buf)
     array = []
     while (value.bytesize > 0)
-      current_instance, value = MLS::Vec.parse_vec(value)
+      current_instance, value = Melos::Vec.parse_vec(value)
       array << current_instance
     end
     [array, buf]
@@ -60,7 +60,7 @@ class MLS::Struct::Base
         value, buf = deserialize_select_elem_with_context(buf, context.to_h, elem[2], elem[3], elem[4])
         context << [elem[0], value]
       when :framed_content_auth_data
-        value, buf = MLS::Struct::FramedContentAuthData.new_and_rest_with_content_type(buf, context.to_h[:content].content_type)
+        value, buf = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(buf, context.to_h[:content].content_type)
         context << [elem[0], value]
       else
         value, buf = deserialize_elem(buf, elem[1], elem[2])
@@ -91,9 +91,9 @@ class MLS::Struct::Base
       value = buf.byteslice(0, 8).unpack1('Q>')
       buf = buf.byteslice(8..)
     when :vec
-      value, buf = MLS::Vec.parse_vec(buf)
+      value, buf = Melos::Vec.parse_vec(buf)
     when :vec_of_type
-      vec, buf = MLS::Vec.parse_vec(buf)
+      vec, buf = Melos::Vec.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
         current_instance, vec = deserialize_elem(vec, type_param, nil)
@@ -104,7 +104,7 @@ class MLS::Struct::Base
     when :classes
       # prefix, length = buf.get_prefix_and_length
       # puts "#{prefix}, #{length}"
-      vec, buf = MLS::Vec.parse_vec(buf)
+      vec, buf = Melos::Vec.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
         current_instance, vec = type_param.send(:new_and_rest, vec)
@@ -141,13 +141,13 @@ class MLS::Struct::Base
     when :uint64
       [value].pack('Q>')
     when :vec
-      MLS::Vec.from_string(value)
+      Melos::Vec.from_string(value)
     when :vec_of_type
-      MLS::Vec.from_string(value.map { serialize_elem(_1, type_param, nil) }.join)
+      Melos::Vec.from_string(value.map { serialize_elem(_1, type_param, nil) }.join)
     when :class, :framed_content_auth_data
       value.raw
     when :classes
-      MLS::Vec.from_string(value.map(&:raw).join)
+      Melos::Vec.from_string(value.map(&:raw).join)
     when :optional
       if value.nil?
         [0].pack('C')

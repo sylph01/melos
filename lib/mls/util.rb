@@ -1,4 +1,4 @@
-module MLS::Util
+module Melos::Util
   extend self
 
   def from_hex(hex)

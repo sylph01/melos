@@ -1,4 +1,4 @@
-class MLS
+class Melos
   MLS_VERSION = 0x01 # mls10
 end
 

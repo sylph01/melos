@@ -1,3 +1,3 @@
-class MLS::Constants
+class Melos::Constants
 
 end

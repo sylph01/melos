@@ -1,4 +1,4 @@
-class MLS::Tree
+class Melos::Tree
   attr_accessor :array, :leaf_count
   # attr_reader @array
 
@@ -227,12 +227,12 @@ class MLS::Tree
     def resolution(tree, node_index)
       node = tree[node_index]
       if node.nil?
-        if MLS::Tree.leaf?(node_index)
+        if Melos::Tree.leaf?(node_index)
           # The resolution of a blank leaf node is the empty list.
           []
         else
           # The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
-          resolution(tree, MLS::Tree.left(node_index)) + resolution(tree, MLS::Tree.right(node_index))
+          resolution(tree, Melos::Tree.left(node_index)) + resolution(tree, Melos::Tree.right(node_index))
         end
       else
         # The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.

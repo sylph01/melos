@@ -15,14 +15,14 @@ end
 
 key_schedule_vectors = JSON.parse(File.read('test_vectors/key-schedule.json'))
 key_schedule_vectors.each do |key_schedule_vector|
-  suite = MLS::Crypto::CipherSuite.new(key_schedule_vector['cipher_suite'])
+  suite = Melos::Crypto::CipherSuite.new(key_schedule_vector['cipher_suite'])
   puts "for cipher suite ID #{key_schedule_vector['cipher_suite']}:"
 
   init_secret = from_hex(key_schedule_vector['initial_init_secret'])
 
   key_schedule_vector['epochs'].each_with_index do |epoch, n|
     commit_secret = from_hex(epoch['commit_secret'])
-    group_context = MLS::Struct::GroupContext.create(
+    group_context = Melos::Struct::GroupContext.create(
       cipher_suite: key_schedule_vector['cipher_suite'],
       group_id: from_hex(key_schedule_vector['group_id']),
       epoch: n,
@@ -32,9 +32,9 @@ key_schedule_vectors.each do |key_schedule_vector|
     )
     # puts to_hex(group_context.raw)
     # puts epoch['group_context']
-    joiner_secret = MLS::Crypto.expand_with_label(
+    joiner_secret = Melos::Crypto.expand_with_label(
       suite,
-      MLS::Crypto.kdf_extract(suite, init_secret, commit_secret),
+      Melos::Crypto.kdf_extract(suite, init_secret, commit_secret),
       "joiner",
       group_context.raw,
       suite.kdf.n_h
@@ -43,13 +43,13 @@ key_schedule_vectors.each do |key_schedule_vector|
     puts "[s] joiner_secret"
 
     # Welcome Secret
-    member_secret = MLS::Crypto.kdf_extract(suite, joiner_secret, from_hex(epoch['psk_secret']))
-    welcome_secret = MLS::Crypto.derive_secret(suite, member_secret, "welcome")
+    member_secret = Melos::Crypto.kdf_extract(suite, joiner_secret, from_hex(epoch['psk_secret']))
+    welcome_secret = Melos::Crypto.derive_secret(suite, member_secret, "welcome")
     assert_equal to_hex(welcome_secret), epoch['welcome_secret']
     puts "[s] welcome_secret"
 
     # Secrets from epoch_secret
-    epoch_secret = MLS::Crypto.expand_with_label(suite, member_secret, "epoch", group_context.raw, suite.kdf.n_h)
+    epoch_secret = Melos::Crypto.expand_with_label(suite, member_secret, "epoch", group_context.raw, suite.kdf.n_h)
 
     secrets = {}
     [
@@ -65,13 +65,13 @@ key_schedule_vectors.each do |key_schedule_vector|
       label = tuple[0]
       name  = tuple[1]
 
-      secrets[name] = MLS::Crypto.derive_secret(suite, epoch_secret, label)
+      secrets[name] = Melos::Crypto.derive_secret(suite, epoch_secret, label)
       assert_equal to_hex(secrets[name]), epoch[name]
       puts "[s] #{name}"
     end
 
     # Next Init Secret
-    init_secret = MLS::Crypto.derive_secret(suite, epoch_secret, "init")
+    init_secret = Melos::Crypto.derive_secret(suite, epoch_secret, "init")
     assert_equal to_hex(init_secret), epoch['init_secret']
     puts "[s] init_secret"
     puts "[s] Epoch #{n}"

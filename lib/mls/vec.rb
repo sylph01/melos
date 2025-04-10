@@ -1,4 +1,4 @@
-module MLS::Vec
+module Melos::Vec
   extend self
 
   def read_varint(data)

@@ -2,7 +2,7 @@ require 'json'
 require 'mls'
 require 'minitest'
 include Minitest::Assertions
-include MLS::Util
+include Melos::Util
 
 class << self
 attr_accessor :assertions
@@ -16,12 +16,12 @@ else
 end
 
 transcript_hash_vectors.each do |thv|
-  suite = MLS::Crypto::CipherSuite.new(thv['cipher_suite'])
+  suite = Melos::Crypto::CipherSuite.new(thv['cipher_suite'])
   puts "cipher suite #{thv['cipher_suite']}:"
 
   confirmation_key = from_hex(thv['confirmation_key'])
   authenticated_content_val = from_hex(thv['authenticated_content'])
-  authenticated_content = MLS::Struct::AuthenticatedContent.new(authenticated_content_val)
+  authenticated_content = Melos::Struct::AuthenticatedContent.new(authenticated_content_val)
 
   interim_transcript_hash = from_hex(thv['interim_transcript_hash_before'])
 
@@ -30,18 +30,18 @@ transcript_hash_vectors.each do |thv|
   puts "[s] AuthenticatedContent has Commit type"
 
   ## MAC, check confirmation tag
-  assert_equal authenticated_content.auth.confirmation_tag, MLS::Crypto.mac(suite, confirmation_key, from_hex(thv['confirmed_transcript_hash_after']))
+  assert_equal authenticated_content.auth.confirmation_tag, Melos::Crypto.mac(suite, confirmation_key, from_hex(thv['confirmed_transcript_hash_after']))
   puts "[s] AuthenticatedContent's FCAD's ConfirmationTag matches MAC"
 
   ## construct ConfirmedTranscriptHashInput
 
-  cth = MLS::Crypto.hash(
+  cth = Melos::Crypto.hash(
     suite,
     interim_transcript_hash + authenticated_content.confirmed_transcript_hash_input.raw
   )
-  ith_next = MLS::Crypto.hash(
+  ith_next = Melos::Crypto.hash(
     suite,
-    cth + MLS::Vec.from_string(authenticated_content.auth.confirmation_tag)
+    cth + Melos::Vec.from_string(authenticated_content.auth.confirmation_tag)
   )
 
   assert_equal to_hex(cth), thv['confirmed_transcript_hash_after']
