@@ -9,6 +9,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
+# test all anyways
 welcome_vectors = JSON.parse(File.read('test_vectors/welcome.json'))
 
 welcome_vectors.each do |wv|

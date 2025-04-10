@@ -43,7 +43,12 @@ def list_node_type(tree)
   end
 end
 
-vectors = JSON.load_file('test_vectors/treekem.json')
+if ENV['TEST_ALL']
+  vectors = JSON.load_file('test_vectors/treekem.json')
+else
+  vectors = JSON.load_file('test_vectors/treekem.json').select { _1['cipher_suite'] == 1 }
+end
+
 vectors.each_with_index do |vector, tree_index|
   suite = MLS::Crypto::CipherSuite.new(vector['cipher_suite'])
   puts "for tree index #{tree_index}, cipher suite ID #{vector['cipher_suite']}:"

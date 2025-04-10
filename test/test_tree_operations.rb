@@ -20,7 +20,9 @@ def check_tree_equality(left, right)
   end
 end
 
+# test all vectors anyways
 vectors = JSON.load_file('test_vectors/tree-operations.json')
+
 vectors.each do |vec|
   suite = MLS::Crypto::CipherSuite.new(vec['cipher_suite'])
   tree_before = MLS::Struct::RatchetTree.parse(from_hex(vec['tree_before']))

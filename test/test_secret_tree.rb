@@ -9,7 +9,11 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-secret_tree_vectors = JSON.parse(File.read('test_vectors/secret-tree.json'))
+if ENV['TEST_ALL']
+  secret_tree_vectors = JSON.parse(File.read('test_vectors/secret-tree.json'))
+else
+  secret_tree_vectors = JSON.parse(File.read('test_vectors/secret-tree.json'))[0..0]
+end
 
 secret_tree_vectors.each do |stv|
   suite = MLS::Crypto::CipherSuite.new(stv['cipher_suite'])

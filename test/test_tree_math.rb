@@ -9,6 +9,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
+# test all vectors anyways
 tree_math_vectors = JSON.parse(File.read('test_vectors/tree-math.json'))
 
 tree_math_vectors.each do |tmv|

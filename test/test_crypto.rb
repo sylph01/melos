@@ -9,7 +9,11 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-crypto_vectors = JSON.parse(File.read('test_vectors/crypto-basics.json'))
+if ENV['TEST_ALL']
+  crypto_vectors = JSON.parse(File.read('test_vectors/crypto-basics.json'))
+else
+  crypto_vectors = JSON.parse(File.read('test_vectors/crypto-basics.json'))[0..0]
+end
 
 crypto_vectors.each_with_index do |vector, index|
   suite = MLS::Crypto::CipherSuite.new(vector['cipher_suite'])

@@ -9,7 +9,11 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-message_vectors = JSON.parse(File.read('test_vectors/messages.json'))[0..]
+if ENV['TEST_ALL']
+  message_vectors = JSON.parse(File.read('test_vectors/messages.json'))
+else
+  message_vectors = JSON.parse(File.read('test_vectors/messages.json'))[0..19]
+end
 
 message_vectors.each_with_index do |message_vector, idx|
 

@@ -9,7 +9,11 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-message_protection_vectors = JSON.parse(File.read('test_vectors/message-protection.json'))[0..0]
+if ENV['TEST_ALL']
+  message_protection_vectors = JSON.parse(File.read('test_vectors/message-protection.json'))
+else
+  message_protection_vectors = JSON.parse(File.read('test_vectors/message-protection.json'))[0..0]
+end
 
 message_protection_vectors.each do |mpv|
   suite = MLS::Crypto::CipherSuite.new(mpv['cipher_suite'])

@@ -9,8 +9,12 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
+if ENV['TEST_ALL']
+  vectors = JSON.load_file('test_vectors/tree-validation.json')
+else
+  vectors = JSON.load_file('test_vectors/tree-validation.json').select { _1['cipher_suite'] == 1 }
+end
 
-vectors = JSON.load_file('test_vectors/tree-validation.json')
 vectors.each_with_index do |vec, tree_index|
   suite = MLS::Crypto::CipherSuite.new(vec['cipher_suite'])
   puts "for tree num #{tree_index}:"
