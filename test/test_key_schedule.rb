@@ -1,5 +1,5 @@
 require 'json'
-require 'mls'
+require 'melos'
 include Minitest::Assertions
 
 class << self

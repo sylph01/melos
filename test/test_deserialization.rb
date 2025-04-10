@@ -1,5 +1,5 @@
 require 'json'
-require 'mls'
+require 'melos'
 require 'minitest'
 include Minitest::Assertions
 
