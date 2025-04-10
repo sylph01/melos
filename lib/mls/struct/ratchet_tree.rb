@@ -225,18 +225,8 @@ module MLS::Struct::RatchetTree
       sibling_node_index = MLS::Tree.sibling_from_leaf(leaf_node_index, node_index, MLS::Tree.n_leaves(ratchet_tree))
       encryption_key = update_path_nodes[path_index].encryption_key
       sibling_node = ratchet_tree[sibling_node_index]
-      # unmerged_leaves = sibling_node.parent_node ? sibling_node.parent_node.unmerged_leaves : []
-      # unmerged_leaves = ratchet_tree[node_index].parent_node.unmerged_leaves
-      # sibling_hash = MLS::Struct::RatchetTree.tree_hash_except(ratchet_tree, sibling_node_index, unmerged_leaves, suite)
       sibling_hash = MLS::Struct::RatchetTree.tree_hash(ratchet_tree, sibling_node_index, suite)
       calculated_parent_hash = MLS::Crypto.parent_hash(suite, encryption_key, calculated_parent_hash, sibling_hash)
-      # p ratchet_tree[node_index]
-      # puts "from: #{leaf_index_from}"
-      # puts "node: #{node_index}"
-      # puts "sibling: #{sibling_node_index}"
-      # puts "sh: #{to_hex sibling_hash}"
-      # puts "sh_w/o_unmerged: #{to_hex MLS::Struct::RatchetTree.tree_hash(ratchet_tree, sibling_node_index, suite)}"
-      # puts "calc: #{to_hex calculated_parent_hash}"
       hashes[path_index] = calculated_parent_hash
     end
 
