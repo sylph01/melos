@@ -13,11 +13,11 @@ class Melos::Crypto
         OpenSSL::PKey.new_raw_private_key('X25519', raw)
       end
 
-      def self.deserialize_public_signing_key(raw)
+      def self.deserialize_public_signature_key(raw)
         OpenSSL::PKey.new_raw_public_key('ED25519', raw)
       end
 
-      def self.deserialize_private_signing_key(raw)
+      def self.deserialize_private_signature_key(raw)
         OpenSSL::PKey.new_raw_private_key('ED25519', raw)
       end
 
@@ -35,11 +35,11 @@ class Melos::Crypto
         OpenSSL::PKey.new_raw_private_key('X448', raw)
       end
 
-      def self.deserialize_public_signing_key(raw)
+      def self.deserialize_public_signature_key(raw)
         OpenSSL::PKey.new_raw_public_key('ED448', raw)
       end
 
-      def self.deserialize_private_signing_key(raw)
+      def self.deserialize_private_signature_key(raw)
         OpenSSL::PKey.new_raw_private_key('ED448', raw)
       end
 
@@ -75,13 +75,13 @@ class Melos::Crypto
       def self.deserialize_private_encapsulation_key(raw)
         self.deserialize_private_key(raw)
       end
-      def self.deserialize_private_signing_key(raw)
+      def self.deserialize_private_signature_key(raw)
         self.deserialize_private_key(raw)
       end
       def self.deserialize_public_encapsulation_key(raw)
         self.deserialize_public_key(raw)
       end
-      def self.deserialize_public_signing_key(raw)
+      def self.deserialize_public_signature_key(raw)
         self.deserialize_public_key(raw)
       end
     end
@@ -239,13 +239,13 @@ class Melos::Crypto
   end
 
   def self.sign_with_label(suite, signature_key, label, content)
-    skey = suite.pkey.deserialize_private_signing_key(signature_key)
+    skey = suite.pkey.deserialize_private_signature_key(signature_key)
     sign_content = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(content)
     skey.sign(suite.pkey.hash_algorithm, sign_content)
   end
 
   def self.verify_with_label(suite, verification_key, label, content, signature_value)
-    vkey = suite.pkey.deserialize_public_signing_key(verification_key)
+    vkey = suite.pkey.deserialize_public_signature_key(verification_key)
     sign_content = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(content)
     vkey.verify(suite.pkey.hash_algorithm, signature_value, sign_content)
   end
@@ -279,6 +279,18 @@ class Melos::Crypto
   def self.encapsulation_key_pair_corresponds?(suite, private_key, public_key)
     private_pkey = suite.pkey.deserialize_private_encapsulation_key(private_key)
     public_pkey  = suite.pkey.deserialize_public_encapsulation_key(public_key)
+    if suite.pkey.equal?(Melos::Crypto::CipherSuite::X25519) || suite.pkey.equal?(Melos::Crypto::CipherSuite::X448)
+      # is an Edwards curve; check equality of the raw public key
+      private_pkey.raw_public_key == public_pkey.raw_public_key
+    else
+      # is an EC; check equality of the public key Point
+      private_pkey.public_key == public_pkey.public_key
+    end
+  end
+
+  def self.signature_key_pair_corresponds?(suite, private_key, public_key)
+    private_pkey = suite.pkey.deserialize_private_signature_key(private_key)
+    public_pkey  = suite.pkey.deserialize_public_signature_key(public_key)
     if suite.pkey.equal?(Melos::Crypto::CipherSuite::X25519) || suite.pkey.equal?(Melos::Crypto::CipherSuite::X448)
       # is an Edwards curve; check equality of the raw public key
       private_pkey.raw_public_key == public_pkey.raw_public_key
