@@ -30,8 +30,8 @@ class Melos::Struct::Credential < Melos::Struct::Base
   attr_reader :credential_type, :identity, :certificates
   STRUCT = [
     [:credential_type, :uint16],
-    [:identity,     :select, ->(ctx){ctx[:credential_type] == 0x0001}, :vec], # 0x0001 = basic
-    [:certificates, :select, ->(ctx){ctx[:credential_type] == 0x0002}, :classes, Melos::Struct::Certificate] #0x0002 = x509
+    [:identity,     :select, ->(ctx){ctx[:credential_type] == Melos::Constants::CredentialType::BASIC}, :vec],
+    [:certificates, :select, ->(ctx){ctx[:credential_type] == Melos::Constants::CredentialType::X509},  :classes, Melos::Struct::Certificate]
   ]
 end
 
@@ -110,8 +110,8 @@ class Melos::Struct::LeafNode < Melos::Struct::Base
     [:credential, :class, Melos::Struct::Credential],
     [:capabilities, :class, Melos::Struct::Capabilities],
     [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
-    [:lifetime, :select,    ->(ctx){ctx[:leaf_node_source] == 0x01}, :class, Melos::Struct::Lifetime], # key_package
-    [:parent_hash, :select, ->(ctx){ctx[:leaf_node_source] == 0x03}, :vec],                        # commit
+    [:lifetime, :select,    ->(ctx){ctx[:leaf_node_source] == Melos::Constants::LeafNodeSource::KEY_PACKAGE}, :class, Melos::Struct::Lifetime],
+    [:parent_hash, :select, ->(ctx){ctx[:leaf_node_source] == Melos::Constants::LeafNodeSource::COMMIT},      :vec],
     [:extensions, :classes, Melos::Struct::Extension],
     [:signature, :vec]
   ]
@@ -123,13 +123,13 @@ class Melos::Struct::LeafNode < Melos::Struct::Base
     buf += credential.raw
     buf += capabilities.raw
     buf += [leaf_node_source].pack('C')
-    if leaf_node_source == 0x01
+    if leaf_node_source == Melos::Constants::LeafNodeSource::KEY_PACKAGE
       buf += lifetime.raw
-    elsif leaf_node_source == 0x03
+    elsif leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
       buf += Melos::Vec.from_string(parent_hash)
     end
     buf += Melos::Vec.from_string(extensions.map(&:raw).join)
-    if leaf_node_source == 0x02 || leaf_node_source == 0x03
+    if leaf_node_source == Melos::Constants::LeafNodeSource::UPDATE || leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
       buf += Melos::Vec.from_string(group_id)
       buf += [leaf_index].pack('L>') # uint32
     end
@@ -159,79 +159,6 @@ class Melos::Struct::LeafNode < Melos::Struct::Base
 
   def verify(suite, group_id, leaf_index)
     Melos::Crypto.verify_with_label(suite, signature_key, "LeafNodeTBS", leaf_node_tbs(group_id, leaf_index), signature)
-  end
-end
-
-class Melos::Struct::LeafNodeTBS < Melos::Struct::Base
-  attr_reader :encryption_key, :signature_key, :credential, :capabilities, :leaf_node_source, :lifetime, :parent_hash, :extensions, :group_id, :leaf_index
-  STRUCT = [
-    [:encryption_key, :vec], # HPKEPublicKey = opaque <V>
-    [:signature_key, :vec],  # SignaturePublicKey = opaque <V>
-    [:credential, :class, Melos::Struct::Credential],
-    [:capabilities, :class, Melos::Struct::Capabilities],
-    [:leaf_node_source, :uint8], # LeafNodeSource = enum of uint8,
-    [:select_leaf_node_source, :custom],
-    [:extensions, :vec],
-    [:select_leaf_node_source_2, :custom]
-  ]
-
-  private
-  def deserialize_select_leaf_node_source(buf, context)
-    returns = []
-    case context[:leaf_node_source]
-    when 0x01 # key_package
-      lifetime, buf = Melos::Struct::Lifetime.new_and_rest(buf)
-      returns << [:lifetime, lifetime]
-    when 0x02 # update
-      # add an empty struct, aka nothing
-    when 0x03 # commit
-      parent_hash, buf = Melos::Vec.parse_vec(buf)
-      returns << [:parent_hash, parent_hash]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def deserialize_select_leaf_node_source_2(buf, context)
-    returns = []
-    case context[:leaf_node_source]
-    when 0x01 # key_package
-      # add an empty struct, aka nothing
-    when 0x02, 0x03 # update, commit
-      group_id, buf = Melos::Vec.parse_vec(buf)
-      returns << [:group_id, group_id]
-      leaf_index = buf.byteslice(0, 4).unpack1('L>') # uint32
-      buf = buf.byteslice(4..)
-      returns << [:leaf_index, leaf_index]
-    else
-      # add nothing
-    end
-    [returns, buf]
-  end
-
-  def serialize_select_leaf_node_source
-    case @leaf_node_source
-    when 0x01
-      @lifetime.raw
-    when 0x02
-      ''
-    when 0x03
-      Melos::Vec.from_string(@parent_hash)
-    else
-      ''
-    end
-  end
-
-  def serialize_select_leaf_node_source_2
-    case @leaf_node_source
-    when 0x01
-      ''
-    when 0x02, 0x03
-      Melos::Vec.from_string(@group_id) + [@leaf_index].pack('L>')
-    else
-      ''
-    end
   end
 end
 
@@ -318,8 +245,8 @@ class Melos::Struct::TreeHashInput < Melos::Struct::Base
   attr_reader :node_type, :leaf_node, :parent_node
   STRUCT = [
     [:node_type, :uint8],
-    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, Melos::Struct::LeafNodeHashInput],   # key_package
-    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, Melos::Struct::ParentNodeHashInput], # update
+    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == Melos::Constants::NodeType::LEAF},   :class, Melos::Struct::LeafNodeHashInput],
+    [:parent_node, :select, ->(ctx){ctx[:node_type] == Melos::Constants::NodeType::PARENT}, :class, Melos::Struct::ParentNodeHashInput],
   ]
 end
 
@@ -367,15 +294,15 @@ class Melos::Struct::PreSharedKeyID < Melos::Struct::Base
   attr_reader :psktype, :psk_id, :psk_group_id, :psk_epoch, :psk_nonce
   STRUCT = [
     [:psktype, :uint8],
-    [:psk_id,       :select, ->(ctx){ctx[:psktype] == 0x01}, :vec],    # external
-    [:psk_group_id, :select, ->(ctx){ctx[:psktype] == 0x02}, :vec],    # resumption
-    [:psk_epoch,    :select, ->(ctx){ctx[:psktype] == 0x02}, :uint64], # resumption
+    [:psk_id,       :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::EXTERNAL}, :vec],    # external
+    [:psk_group_id, :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::RESUMPTION}, :vec],    # resumption
+    [:psk_epoch,    :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::RESUMPTION}, :uint64], # resumption
     [:psk_nonce, :vec]
   ]
 
   def self.create_external(psk_id:, psk_nonce:)
     new_instance = self.allocate
-    new_instance.instance_variable_set(:@psktype, 0x01)
+    new_instance.instance_variable_set(:@psktype, Melos::Constants::PSKType::EXTERNAL)
     new_instance.instance_variable_set(:@psk_id, psk_id)
     new_instance.instance_variable_set(:@psk_nonce, psk_nonce)
     new_instance
@@ -511,13 +438,13 @@ class Melos::Struct::Proposal < Melos::Struct::Base
   attr_reader :proposal_type, :add, :update, :remove, :psk, :reinit, :external_init, :group_context_extensions
   STRUCT = [
     [:proposal_type, :uint16],
-    [:add, :select, ->(ctx){ctx[:proposal_type] == 0x01}, :class, Melos::Struct::Add],
-    [:update, :select, ->(ctx){ctx[:proposal_type] == 0x02}, :class, Melos::Struct::Update],
-    [:remove, :select, ->(ctx){ctx[:proposal_type] == 0x03}, :class, Melos::Struct::Remove],
-    [:psk, :select, ->(ctx){ctx[:proposal_type] == 0x04}, :class, Melos::Struct::PreSharedKey],
-    [:reinit, :select, ->(ctx){ctx[:proposal_type] == 0x05}, :class, Melos::Struct::ReInit],
-    [:external_init, :select, ->(ctx){ctx[:proposal_type] == 0x06}, :class, Melos::Struct::ExternalInit],
-    [:group_context_extensions, :select, ->(ctx){ctx[:proposal_type] == 0x07}, :class, Melos::Struct::GroupContextExtensions],
+    [:add, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::ADD}, :class, Melos::Struct::Add],
+    [:update, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::UPDATE}, :class, Melos::Struct::Update],
+    [:remove, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::REMOVE}, :class, Melos::Struct::Remove],
+    [:psk, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::PSK}, :class, Melos::Struct::PreSharedKey],
+    [:reinit, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::REINIT}, :class, Melos::Struct::ReInit],
+    [:external_init, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::EXTERNAL_INIT}, :class, Melos::Struct::ExternalInit],
+    [:group_context_extensions, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS}, :class, Melos::Struct::GroupContextExtensions],
   ]
 
   def proposal_content
@@ -531,8 +458,8 @@ class Melos::Struct::ProposalOrRef < Melos::Struct::Base
   attr_reader :type, :proposal, :reference
   STRUCT = [
     [:type, :uint8],
-    [:proposal, :select,  ->(ctx){ctx[:type] == 0x01}, :class, Melos::Struct::Proposal],
-    [:reference, :select, ->(ctx){ctx[:type] == 0x02}, :vec] # ProposalRef is a HashReference, which is a :vec
+    [:proposal, :select,  ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::PROPOSAL}, :class, Melos::Struct::Proposal],
+    [:reference, :select, ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::REFERENCE}, :vec] # ProposalRef is a HashReference, which is a :vec
   ]
 end
 
@@ -642,8 +569,8 @@ class Melos::Struct::Node < Melos::Struct::Base
   attr_reader :node_type, :leaf_node, :parent_node
   STRUCT = [
     [:node_type, :uint8],
-    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == 0x01}, :class, Melos::Struct::LeafNode], # leaf
-    [:parent_node, :select, ->(ctx){ctx[:node_type] == 0x02}, :class, Melos::Struct::ParentNode] # parent
+    [:leaf_node,   :select, ->(ctx){ctx[:node_type] == Melos::Constants::NodeType::LEAF},   :class, Melos::Struct::LeafNode], # leaf
+    [:parent_node, :select, ->(ctx){ctx[:node_type] == Melos::Constants::NodeType::PARENT}, :class, Melos::Struct::ParentNode] # parent
   ]
 
   def parent_hash_in_node
@@ -667,12 +594,12 @@ class Melos::Struct::Node < Melos::Struct::Base
   end
 
   def new_leaf_node_impl(leaf_node)
-    @node_type = 0x01
+    @node_type = Melos::Constants::NodeType::LEAF
     @leaf_node = leaf_node
   end
 
   def new_parent_node_impl(parent_node)
-    @node_type = 0x02
+    @node_type = Melos::Constants::NodeType::PARENT
     @parent_node = parent_node
   end
 end
@@ -682,20 +609,20 @@ class Melos::Struct::Sender < Melos::Struct::Base
   attr_reader :sender_type, :leaf_index, :sender_index
   STRUCT = [
     [:sender_type, :uint8],
-    [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == 0x01}, :uint32], # 0x01 = member
-    [:sender_index, :select, ->(ctx){ctx[:sender_type] == 0x02}, :uint32], # 0x02 = external
+    [:leaf_index,   :select, ->(ctx){ctx[:sender_type] == Melos::Constants::SenderType::MEMBER}, :uint32],
+    [:sender_index, :select, ->(ctx){ctx[:sender_type] == Melos::Constants::SenderType::EXTERNAL}, :uint32],
   ]
 
   def self.create_member(leaf_index)
     instance = self.allocate
-    instance.instance_variable_set(:@sender_type, 0x01)
+    instance.instance_variable_set(:@sender_type, Melos::Constants::SenderType::MEMBER)
     instance.instance_variable_set(:@leaf_index, leaf_index)
     instance
   end
 
   def self.create_external(sender_index)
     instance = self.allocate
-    instance.instance_variable_set(:@sender_type, 0x02)
+    instance.instance_variable_set(:@sender_type, Melos::Constants::SenderType::EXTERNAL)
     instance.instance_variable_set(:@sender_index, sender_index)
     instance
   end
@@ -713,7 +640,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
     instance = self.allocate
     context, buf = instance.send(:deserialize, buf)
     # custom part based on instance variable
-    if content_type == 0x03 # commit
+    if content_type == Melos::Constants::ContentType::COMMIT # commit
       # read MAC(opaque <V>) confirmation_tag
       value, buf = Melos::Vec.parse_vec(buf)
       context << [:confirmation_tag, value]
@@ -724,7 +651,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
   end
 
   def raw
-    if @content_type == 0x03
+    if @content_type == Melos::Constants::ContentType::COMMIT
       Melos::Vec.from_string(@signature) + Melos::Vec.from_string(@confirmation_tag)
     else
       Melos::Vec.from_string(@signature)
@@ -735,7 +662,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
     instance = self.allocate
     instance.instance_variable_set(:@signature, signature)
     instance.instance_variable_set(:@content_type, content_type)
-    if content_type == 0x03
+    if content_type == Melos::Constants::ContentType::COMMIT
       instance.instance_variable_set(:@confirmation_tag, confirmation_tag)
     end
     instance
@@ -750,17 +677,17 @@ class Melos::Struct::FramedContent < Melos::Struct::Base
     [:sender, :class, Melos::Struct::Sender],
     [:authenticated_data, :vec],
     [:content_type, :uint8],
-    [:application_data, :select, ->(context){context[:content_type] == 0x01}, :vec],
-    [:proposal,         :select, ->(context){context[:content_type] == 0x02}, :class, Melos::Struct::Proposal],
-    [:commit,           :select, ->(context){context[:content_type] == 0x03}, :class, Melos::Struct::Commit]
+    [:application_data, :select, ->(context){context[:content_type] == Melos::Constants::ContentType::APPLICATION}, :vec],
+    [:proposal,         :select, ->(context){context[:content_type] == Melos::Constants::ContentType::PROPOSAL}, :class, Melos::Struct::Proposal],
+    [:commit,           :select, ->(context){context[:content_type] == Melos::Constants::ContentType::COMMIT}, :class, Melos::Struct::Commit]
   ]
 
   def content_tbs(version, wire_format, group_context)
     buf = [version].pack('S>') + [wire_format].pack('S>') + self.raw
     case sender.sender_type
-    when 0x01, 0x04 # member, new_member_commit
+    when Melos::Constants::SenderType::MEMBER, Melos::Constants::SenderType::NEW_MEMBER_COMMIT
       buf += group_context.raw
-    when 0x02, 0x03 # external, new_member_proposal
+    when Melos::Constants::SenderType::EXTERNAL, Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL
       # do nothing
     end
     buf
@@ -774,25 +701,15 @@ class Melos::Struct::FramedContent < Melos::Struct::Base
     new_instance.instance_variable_set(:@authenticated_data, authenticated_data)
     new_instance.instance_variable_set(:@content_type, content_type)
     case content_type
-    when 0x01 # application_data
+    when Melos::Constants::ContentType::APPLICATION
       new_instance.instance_variable_set(:@application_data, content)
-    when 0x02 # proposal
+    when Melos::Constants::ContentType::PROPOSAL
       new_instance.instance_variable_set(:@proposal, content)
-    when 0x03 # commit
+    when Melos::Constants::ContentType::COMMIT
       new_instance.instance_variable_set(:@commit, content)
     end
     new_instance
   end
-end
-
-class Melos::Struct::FramedContentTBS < Melos::Struct::Base
-  attr_reader :version, :wire_format, :content, :context
-  STRUCT = [
-    [:version, :uint16], #mls10 = 1
-    [:wire_format, :uint16],
-    [:content, :class, Melos::Struct::FramedContent],
-    [:context, :select, ->(ctx){[0x01, 0x04].include?(ctx[:content].sender.sender_type)}, :class, Melos::Struct::GroupContext]
-  ]
 end
 
 class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
@@ -804,7 +721,7 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
   ]
 
   def content_tbm
-    content.content_tbs(0x01, wire_format) + auth.raw
+    content.content_tbs(Melos::Constants::Version::MLS10, wire_format) + auth.raw
   end
 
   def confirmed_transcript_hash_input
@@ -816,9 +733,9 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
   end
 
   def verify(suite, signature_public_key, context)
-    return false if (wire_format == 0x01 && content.content_type == 0x01)
+    return false if (wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE && content.content_type == Melos::Constants::ContentType::APPLICATION)
 
-    content_tbs = content.content_tbs(0x01, wire_format, context)
+    content_tbs = content.content_tbs(Melos::Constants::Version::MLS10, wire_format, context)
 
     return Melos::Crypto.verify_with_label(suite, signature_public_key, "FramedContentTBS", content_tbs, auth.signature)
   end
@@ -833,8 +750,8 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
 
   # populate auth with values
   def sign(suite, signature_private_key, group_context)
-    raise ArgumentError.new('Application data cannot be sent as a PublicMessage') if wire_format == 0x01 && content.content_type == 0x01
-    content_tbs = content.content_tbs(0x01, wire_format, group_context)
+    raise ArgumentError.new('Application data cannot be sent as a PublicMessage') if wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE && content.content_type == Melos::Constants::ContentType::APPLICATION
+    content_tbs = content.content_tbs(Melos::Constants::Version::MLS10, wire_format, group_context)
     signature = Melos::Crypto.sign_with_label(suite, signature_private_key, "FramedContentTBS", content_tbs)
     @auth = Melos::Struct::FramedContentAuthData.create(
       signature: signature,
@@ -851,14 +768,14 @@ class Melos::Struct::PublicMessage < Melos::Struct::Base
   STRUCT = [
     [:content, :class, Melos::Struct::FramedContent],
     [:auth, :framed_content_auth_data],
-    [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == 0x01}, :vec] # mmeber; MAC is opaque <V>
+    [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == Melos::Constants::SenderType::MEMBER}, :vec] # MAC is opaque <V>
   ]
 
   def self.protect(authenticated_content, suite, membership_key, group_context)
     message = self.allocate
     message.instance_variable_set(:@content, authenticated_content.content)
     message.instance_variable_set(:@auth, authenticated_content.auth)
-    if message.content.sender.sender_type == 0x01 # member
+    if message.content.sender.sender_type == Melos::Constants::SenderType::MEMBER # member
       message.instance_variable_set(:@membership_tag, message.membership_mac(suite, membership_key, group_context))
     end
     message
@@ -866,18 +783,22 @@ class Melos::Struct::PublicMessage < Melos::Struct::Base
 
   def unprotect(suite, membership_key, group_context)
     ## if sender type is member then membershipMac(suite, membership_key, group_context)
-    if (content.sender.sender_type == 0x01)
+    if (content.sender.sender_type == Melos::Constants::SenderType::MEMBER)
       return nil if membership_tag != membership_mac(suite, membership_key, group_context)
     end
     Melos::Struct::AuthenticatedContent.create(
-      wire_format: 0x01, # public_message
+      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, # public_message
       content: content,
       auth: auth
     )
   end
 
   def membership_mac(suite, membership_key, group_context)
-    authenticated_content_tbm = content.content_tbs(0x01, 0x01, group_context) + auth.raw
+    authenticated_content_tbm = content.content_tbs(
+      Melos::Constants::Version::MLS10,
+      Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
+      group_context
+    ) + auth.raw
     Melos::Crypto.mac(suite, membership_key, authenticated_content_tbm)
   end
 end
@@ -976,7 +897,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     )
 
     Melos::Struct::AuthenticatedContent.create(
-      wire_format: 0x0002, # private_message
+      wire_format: Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, # private_message
       content: fc,
       auth: pmc.auth
     )
@@ -1001,15 +922,15 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
   def self.serialize_private_message_content(framed_content, framed_content_auth_data, padding_size)
     buf = ''
     case framed_content.content_type
-    when 0x01 # application
+    when Melos::Constants::ContentType::APPLICATION
       buf += Melos::Vec.from_string(framed_content.application_data)
-    when 0x02 # proposal
+    when Melos::Constants::ContentType::PROPOSAL
       buf += framed_content.proposal.raw
-    when 0x03 # commit
+    when Melos::Constants::ContentType::COMMIT
       buf += framed_content.commit.raw
     end
     buf += Melos::Vec.from_string(framed_content_auth_data.signature)
-    if framed_content.content_type == 0x03 # commit
+    if framed_content.content_type == Melos::Constants::ContentType::COMMIT
       buf += Melos::Vec.from_string(framed_content_auth_data.confirmation_tag)
     end
     buf += Melos::Crypto::Util.zero_vector(padding_size)
@@ -1027,13 +948,13 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
     context = []
     # deserialize application_data/proposal/commit
     case content_type
-    when 0x01 # application
+    when Melos::Constants::ContentType::APPLICATION
       value, buf = Melos::Vec.parse_vec(buf)
       context << [:application_data, value]
-    when 0x02 # proposal
+    when Melos::Constants::ContentType::PROPOSAL
       value, buf = Melos::Struct::Proposal.new_and_rest(buf)
       context << [:proposal, value]
-    when 0x03 # commit
+    when Melos::Constants::ContentType::COMMIT
       value, buf = Melos::Struct::Commit.new_and_rest(buf)
       context << [:commit, value]
     end
@@ -1081,15 +1002,15 @@ class Melos::Struct::MLSMessage < Melos::Struct::Base
   STRUCT = [
     [:version, :uint16], #mls10 = 1
     [:wire_format, :uint16],
-    [:public_message,  :select, ->(ctx){ctx[:wire_format] == 0x0001}, :class, Melos::Struct::PublicMessage],
-    [:private_message, :select, ->(ctx){ctx[:wire_format] == 0x0002}, :class, Melos::Struct::PrivateMessage],
-    [:welcome,         :select, ->(ctx){ctx[:wire_format] == 0x0003}, :class, Melos::Struct::Welcome],
-    [:group_info,      :select, ->(ctx){ctx[:wire_format] == 0x0004}, :class, Melos::Struct::GroupInfo],
-    [:key_package,     :select, ->(ctx){ctx[:wire_format] == 0x0005}, :class, Melos::Struct::KeyPackage]
+    [:public_message,  :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE}, :class, Melos::Struct::PublicMessage],
+    [:private_message, :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE}, :class, Melos::Struct::PrivateMessage],
+    [:welcome,         :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_WELCOME}, :class, Melos::Struct::Welcome],
+    [:group_info,      :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_GROUP_INFO}, :class, Melos::Struct::GroupInfo],
+    [:key_package,     :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_KEY_PACKAGE}, :class, Melos::Struct::KeyPackage]
   ]
 
   def verify(suite, signer_public_key, group_context)
-    if wire_format == 0x0001
+    if wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
       public_message.verify(suite, signer_public_key, version, wire_format, group_context)
     end
   end
