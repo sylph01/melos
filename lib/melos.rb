@@ -5,6 +5,8 @@ end
 require_relative 'melos/vec'
 require_relative 'melos/tree'
 require_relative 'melos/util'
+require_relative 'melos/constants'
+require_relative 'melos/key_schedule'
 require_relative 'melos/secret_tree'
 require_relative 'melos/struct/base'
 require_relative 'melos/struct/structs'

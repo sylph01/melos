@@ -1,6 +1,8 @@
 require 'json'
 require 'melos'
+require 'minitest'
 include Minitest::Assertions
+include Melos::Util
 
 class << self
 attr_accessor :assertions
@@ -32,46 +34,36 @@ key_schedule_vectors.each do |key_schedule_vector|
     )
     # puts to_hex(group_context.raw)
     # puts epoch['group_context']
-    joiner_secret = Melos::Crypto.expand_with_label(
-      suite,
-      Melos::Crypto.kdf_extract(suite, init_secret, commit_secret),
-      "joiner",
-      group_context.raw,
-      suite.kdf.n_h
-    )
+    joiner_secret = Melos::KeySchedule.joiner_secret(suite, init_secret, commit_secret, group_context)
     assert_equal to_hex(joiner_secret), epoch['joiner_secret']
     puts "[s] joiner_secret"
 
     # Welcome Secret
-    member_secret = Melos::Crypto.kdf_extract(suite, joiner_secret, from_hex(epoch['psk_secret']))
-    welcome_secret = Melos::Crypto.derive_secret(suite, member_secret, "welcome")
+    psk_secret = from_hex(epoch['psk_secret'])
+    welcome_secret = Melos::KeySchedule.welcome_secret(suite, joiner_secret, psk_secret)
     assert_equal to_hex(welcome_secret), epoch['welcome_secret']
     puts "[s] welcome_secret"
 
     # Secrets from epoch_secret
-    epoch_secret = Melos::Crypto.expand_with_label(suite, member_secret, "epoch", group_context.raw, suite.kdf.n_h)
+    epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
 
-    secrets = {}
+    # secrets = {}
     [
-      ['sender data', 'sender_data_secret'],
-      ['encryption',  'encryption_secret'],
-      ['exporter',    'exporter_secret'],
-      ['external',    'external_secret'],
-      ['confirm',     'confirmation_key'],
-      ['membership',  'membership_key'],
-      ['resumption',  'resumption_psk'],
-      ['authentication', 'epoch_authenticator']
-    ].each do |tuple|
-      label = tuple[0]
-      name  = tuple[1]
-
-      secrets[name] = Melos::Crypto.derive_secret(suite, epoch_secret, label)
-      assert_equal to_hex(secrets[name]), epoch[name]
-      puts "[s] #{name}"
+      'sender_data_secret',
+      'encryption_secret',
+      'exporter_secret',
+      'external_secret',
+      'confirmation_key',
+      'membership_key',
+      'resumption_psk',
+      'epoch_authenticator'
+    ].each do |secret_name|
+      assert_equal Melos::KeySchedule.send(secret_name.to_sym, suite, epoch_secret), from_hex(epoch[secret_name])
+      puts "[s] #{secret_name}"
     end
 
     # Next Init Secret
-    init_secret = Melos::Crypto.derive_secret(suite, epoch_secret, "init")
+    init_secret = Melos::KeySchedule.init_secret(suite, epoch_secret)
     assert_equal to_hex(init_secret), epoch['init_secret']
     puts "[s] init_secret"
     puts "[s] Epoch #{n}"
