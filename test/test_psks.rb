@@ -26,10 +26,7 @@ psk_vectors.each_with_index do |psk_vector, total_idx|
       psk_id: from_hex(_1['psk_id']),
       psk_nonce: from_hex(_1['psk_nonce'])
     )
-    {
-      psk_id: preshared_key_id.raw,
-      psk: from_hex(_1['psk'])
-    }
+    [preshared_key_id.raw, from_hex(_1['psk'])]
   }
 
   assert_equal from_hex(psk_vector['psk_secret']), Melos::PSK.psk_secret(suite, psk_array)

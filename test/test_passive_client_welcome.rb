@@ -56,10 +56,7 @@ vectors.each_with_index do |vec, vec_index|
   joiner_secret = group_secrets.joiner_secret
   psk_ids = group_secrets.psks
   psks = psk_ids.map do |psk_id|
-    {
-      psk_id: psk_id.raw,
-      psk: external_psks[psk_id.psk_id]
-    }
+    [psk_id.raw, external_psks[psk_id.psk_id]]
   end
   # TODO: If a PreSharedKeyID is part of the GroupSecrets and the client is not in possession of the corresponding PSK, return an error. Additionally, if a PreSharedKeyID has type resumption with usage reinit or branch, verify that it is the only such PSK.
   psk_secret = Melos::PSK.psk_secret(suite, psks)

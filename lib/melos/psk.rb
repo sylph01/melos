@@ -3,12 +3,12 @@ require_relative 'crypto'
 module Melos::PSK
   extend self
 
-  # input: array of {psk_id: (raw PSK id), psk: (raw PSK value)}
+  # input: array of [(raw PSK ID), (PSK value)]
   def psk_secret(suite, psk_array)
     secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h)
 
-    psk_array.each_with_index do |psk, idx|
-      psk_id = Melos::Struct::PreSharedKeyID.new(psk[:psk_id])
+    psk_array.each_with_index do |tuple, idx|
+      psk_id = Melos::Struct::PreSharedKeyID.new(tuple[0])
       psk_label = Melos::Struct::PSKLabel.create(
         id: psk_id,
         index: idx,
@@ -18,7 +18,7 @@ module Melos::PSK
       extracted = Melos::Crypto.kdf_extract(
         suite,
         Melos::Crypto::Util.zero_vector(suite.kdf.n_h),
-        psk[:psk]
+        tuple[1]
       )
       input = Melos::Crypto.expand_with_label(
         suite,
