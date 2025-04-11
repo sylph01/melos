@@ -36,9 +36,11 @@ vectors.each_with_index do |vec, vec_index|
 
   welcome = Melos::Struct::MLSMessage.new(from_hex(vec['welcome']))
 
+  # 12.4.3.1 Joining via Welcome Message
   # Join the group using the Welcome message described by welcome, the ratchet tree described by ratchet_tree (if given) and the pre-shared keys described in external_psks
   # param: welcome message itself, keypackage, external_psks(psk_id_name -> psk)
   kp_ref = key_package.key_package.ref(suite)
+  # identify which new_member entry to use
   egs = welcome.welcome.secrets.find { _1.new_member == kp_ref }&.encrypted_group_secrets
 
   group_secrets = Melos::Struct::GroupSecrets.new(
@@ -59,6 +61,7 @@ vectors.each_with_index do |vec, vec_index|
       psk: external_psks[psk_id.psk_id]
     }
   end
+  # TODO: If a PreSharedKeyID is part of the GroupSecrets and the client is not in possession of the corresponding PSK, return an error. Additionally, if a PreSharedKeyID has type resumption with usage reinit or branch, verify that it is the only such PSK.
   psk_secret = Melos::PSK.psk_secret(suite, psks)
 
   key, nonce = Melos::KeySchedule.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
@@ -71,6 +74,21 @@ vectors.each_with_index do |vec, vec_index|
       welcome.welcome.encrypted_group_info
     )
   )
+
+  ## verify signature of GroupInfo object
+  group_info_signer = group_info.signer
+  # construct ratchet tree
+  if vec['ratchet_tree']
+    # get ratchet tree from vector
+    ratchet_tree = Melos::Struct::RatchetTree.parse(from_hex(vec['ratchet_tree']))
+  else
+    # get ratchet tree from extensions
+    ratchet_tree = Melos::Struct::RatchetTree.parse(group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }.extension_data)
+  end
+  # get signer key
+  pub_key_of_signer = ratchet_tree[group_info_signer * 2].leaf_node.signature_key
+  assert group_info.verify(suite, pub_key_of_signer)
+
   group_context = group_info.group_context
   # we want this out of processing welcome
 
