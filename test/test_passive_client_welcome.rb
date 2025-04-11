@@ -9,16 +9,15 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-vectors = JSON.load_file('test_vectors/passive-client-welcome.json')[0..0]
+vectors = JSON.load_file('test_vectors/passive-client-welcome.json')
 
-vectors.each do |vec|
+vectors.each_with_index do |vec, vec_index|
+  puts "vector # #{vec_index}:"
   suite = Melos::Crypto::CipherSuite.new(vec['cipher_suite'])
+  # As reading from bc-java's implementation, this test assumes that psk_nonce is the psk itself...?
   external_psks = vec['external_psks'].map {
-    {
-      psk_id: from_hex(_1['psk_id']),
-      psk: from_hex(_1['psk'])
-    }
-  }
+    [from_hex(_1['psk_id']), from_hex(_1['psk'])]
+  }.to_h
   # it says /* serialized KeyPackage */ but it's actually an MLSMessage that has a KeyPackage inside it!
   key_package = Melos::Struct::MLSMessage.new(from_hex(vec['key_package']))
   signature_priv = from_hex(vec['signature_priv'])
@@ -37,8 +36,8 @@ vectors.each do |vec|
 
   welcome = Melos::Struct::MLSMessage.new(from_hex(vec['welcome']))
 
-  # process welcome
-  # param: welcome message itself, keypackage, psks
+  # Join the group using the Welcome message described by welcome, the ratchet tree described by ratchet_tree (if given) and the pre-shared keys described in external_psks
+  # param: welcome message itself, keypackage, external_psks(psk_id_name -> psk)
   kp_ref = key_package.key_package.ref(suite)
   egs = welcome.welcome.secrets.find { _1.new_member == kp_ref }&.encrypted_group_secrets
 
@@ -53,5 +52,30 @@ vectors.each do |vec|
     )
   )
   joiner_secret = group_secrets.joiner_secret
-  p group_secrets
+  psk_ids = group_secrets.psks
+  psks = psk_ids.map do |psk_id|
+    {
+      psk_id: psk_id.raw,
+      psk: external_psks[psk_id.psk_id]
+    }
+  end
+  psk_secret = Melos::PSK.psk_secret(suite, psks)
+
+  key, nonce = Melos::KeySchedule.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
+  group_info = Melos::Struct::GroupInfo.new(
+    Melos::Crypto.aead_decrypt(
+      suite,
+      key,
+      nonce,
+      "",
+      welcome.welcome.encrypted_group_info
+    )
+  )
+  group_context = group_info.group_context
+  # we want this out of processing welcome
+
+  epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
+  epoch_authenticator = Melos::KeySchedule.epoch_authenticator(suite, epoch_secret)
+  assert_equal epoch_authenticator, from_hex(vec['initial_epoch_authenticator'])
+  puts "[pass] Verify that the locally computed epoch_authenticator value is equal to the initial_epoch_authenticator value"
 end

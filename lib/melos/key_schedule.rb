@@ -21,6 +21,14 @@ module Melos::KeySchedule
     )
   end
 
+  def welcome_key_and_nonce(suite, joiner_secret, psk_secret)
+    ws = welcome_secret(suite, joiner_secret, psk_secret)
+    [
+      Melos::Crypto.expand_with_label(suite, ws, "key",   "", suite.hpke.n_k),
+      Melos::Crypto.expand_with_label(suite, ws, "nonce", "", suite.hpke.n_n)
+    ]
+  end
+
   def epoch_secret(suite, joiner_secret, psk_secret, group_context)
     Melos::Crypto.expand_with_label(
       suite,
