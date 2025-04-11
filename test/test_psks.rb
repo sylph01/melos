@@ -21,35 +21,17 @@ psk_vectors.each_with_index do |psk_vector, total_idx|
   puts "vector #{total_idx}, cipher_suite #{psk_vector["cipher_suite"]}"
 
   psk_secret = zero_vector
-  psk_vector['psks'].each_with_index do |psk, idx|
-    psk_id    = from_hex(psk['psk_id'])
-    psk_value = from_hex(psk['psk'])
-    psk_nonce = from_hex(psk['psk_nonce'])
-
+  psk_array = psk_vector['psks'].map {
     preshared_key_id = Melos::Struct::PreSharedKeyID.create_external(
-      psk_id: psk_id,
-      psk_nonce: psk_nonce
+      psk_id: from_hex(_1['psk_id']),
+      psk_nonce: from_hex(_1['psk_nonce'])
     )
+    {
+      psk_id: preshared_key_id.raw,
+      psk: from_hex(_1['psk'])
+    }
+  }
 
-    psk_label = Melos::Struct::PSKLabel.create(
-      id: preshared_key_id,
-      index: idx,
-      count: psk_vector['psks'].count
-    )
-
-    psk_extracted = Melos::Crypto.kdf_extract(suite, zero_vector, psk_value)
-    # puts to_hex(preshared_key_id.raw)
-    # puts to_hex(psk_label.raw)
-    psk_input     = Melos::Crypto.expand_with_label(
-      suite,
-      psk_extracted,
-      "derived psk",
-      psk_label.raw,
-      suite.kdf.n_h
-    )
-    psk_secret = Melos::Crypto.kdf_extract(suite, psk_input, psk_secret)
-  end
-  # do stuff
-  assert_equal to_hex(psk_secret), psk_vector['psk_secret']
+  assert_equal from_hex(psk_vector['psk_secret']), Melos::PSK.psk_secret(suite, psk_array)
   puts "[s] psk_secret"
 end
