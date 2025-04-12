@@ -258,11 +258,11 @@ module Melos::Struct::RatchetTree
       end
     end
 
-    target_update_path_node = update_path.nodes[overlap_index]
-    raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
-    target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
     raise ArgumentError.new('priv key not found in tree') if priv_key.nil?
     pkey = suite.pkey.deserialize_private_encapsulation_key(priv_key)
+    target_update_path_node = update_path.nodes[overlap_index]
+    target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
+    raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
 
     Melos::Crypto.decrypt_with_label(suite, priv_key, "UpdatePathNode", group_context.raw, target_encrypted_path_secret.kem_output, target_encrypted_path_secret.ciphertext)
   end
