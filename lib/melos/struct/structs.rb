@@ -291,10 +291,11 @@ end
 ## 8.4
 
 class Melos::Struct::PreSharedKeyID < Melos::Struct::Base
-  attr_reader :psktype, :psk_id, :psk_group_id, :psk_epoch, :psk_nonce
+  attr_reader :psktype, :psk_id, :usage, :psk_group_id, :psk_epoch, :psk_nonce
   STRUCT = [
     [:psktype, :uint8],
     [:psk_id,       :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::EXTERNAL}, :vec],    # external
+    [:usage,        :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::RESUMPTION}, :uint8],  # resumption
     [:psk_group_id, :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::RESUMPTION}, :vec],    # resumption
     [:psk_epoch,    :select, ->(ctx){ctx[:psktype] == Melos::Constants::PSKType::RESUMPTION}, :uint64], # resumption
     [:psk_nonce, :vec]
