@@ -76,8 +76,11 @@ vectors.each_with_index do |vector, tree_index|
   assert_equal true, consistent?(encryption_priv_tree, ratchet_tree, suite)
   puts "[pass] Verify that the resulting private state leaf_private[i] is consistent with the ratchet_tree"
 
+  encryption_priv_tree_original = encryption_priv_tree.dup
+
   # update paths
   vector['update_paths'].each do |up|
+    encryption_priv_tree = encryption_priv_tree_original.dup # reset encryption_priv_tree
     sender = up['sender']
     puts "For sender #{sender} (node: #{sender * 2})"
     update_path = Melos::Struct::UpdatePath.new(from_hex(up['update_path']))
