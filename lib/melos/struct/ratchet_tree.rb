@@ -134,6 +134,7 @@ module Melos::Struct::RatchetTree
           tree[node_index] = node_to_insert
           inserted = true
           inserted_node_index = node_index
+          break
         end
       else
         # do nothing to a parent
@@ -290,7 +291,10 @@ module Melos::Struct::RatchetTree
       if node.nil?
         puts "#{index}, nil"
       elsif node.parent_node
-        puts "#{index}, PN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]})"
+        puts "#{index}, PN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]}) "
+        if node.parent_node.unmerged_leaves
+          puts " - #{node.parent_node.unmerged_leaves}"
+        end
       else
         puts "#{index}, LN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]})"
       end
