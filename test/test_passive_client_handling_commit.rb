@@ -157,7 +157,7 @@ vectors.each_with_index do |vec, vec_index|
       # TODO: define RatchetTree.apply_proposal() or Group.apply_proposal()
       # in this order
       # GroupContextExtensions
-      group_context_extensions = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
+      # group_context_extensions = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
 
       # Update
       updates = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::UPDATE }

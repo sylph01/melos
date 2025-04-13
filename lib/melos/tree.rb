@@ -129,7 +129,7 @@ class Melos::Tree
     def parent(x, n_leaves)
       raise ArgumentError.new('root node has no parent') if x == root(n_leaves)
       k = level(x)
-      b = (x >> (k +1)) & 0x01
+      b = (x >> (k + 1)) & 0x01
       (x | (1 << k)) ^ (b << (k + 1))
     end
 
@@ -203,7 +203,6 @@ class Melos::Tree
     end
 
     def truncate!(tree)
-      last_node_index = tree.count - 1
       root = root(n_leaves(tree))
       if tree[(root + 1)..]&.all?(nil)
         tree.slice!(root..) # keep left half of tree

@@ -226,7 +226,6 @@ module Melos::Struct::RatchetTree
       leaf_node_index = leaf_index_from * 2
       sibling_node_index = Melos::Tree.sibling_from_leaf(leaf_node_index, node_index, Melos::Tree.n_leaves(ratchet_tree))
       encryption_key = update_path_nodes[path_index].encryption_key
-      sibling_node = ratchet_tree[sibling_node_index]
       sibling_hash = Melos::Struct::RatchetTree.tree_hash(ratchet_tree, sibling_node_index, suite)
       calculated_parent_hash = Melos::Crypto.parent_hash(suite, encryption_key, calculated_parent_hash, sibling_hash)
       hashes[path_index] = calculated_parent_hash
@@ -236,7 +235,6 @@ module Melos::Struct::RatchetTree
   end
 
   def self.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context, leaves_to_remove = [])
-    sender_node_index = sender_leaf_index * 2
     receiver_node_index = receiver_leaf_index * 2
 
     filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
@@ -262,7 +260,6 @@ module Melos::Struct::RatchetTree
     end
 
     raise ArgumentError.new('priv key not found in tree') if priv_key.nil?
-    pkey = suite.pkey.deserialize_private_encapsulation_key(priv_key)
     target_update_path_node = update_path.nodes[overlap_index]
     target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
     raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
@@ -271,7 +268,6 @@ module Melos::Struct::RatchetTree
   end
 
   def self.calculate_commit_secret(suite, ratchet_tree, update_path, sender_leaf_index, receiver_leaf_index, path_secret)
-    sender_node_index = sender_leaf_index * 2
     receiver_node_index = receiver_leaf_index * 2
 
     filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
