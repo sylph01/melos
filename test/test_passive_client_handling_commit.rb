@@ -9,10 +9,10 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..7]
+vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..12]
 
 vectors.each_with_index do |vec, vec_index|
-  puts "vector # #{vec_index}:"
+  puts "vector # #{vec_index}, cipher suite #{vec['cipher_suite']}:"
   suite = Melos::Crypto::CipherSuite.new(vec['cipher_suite'])
   # As reading from bc-java's implementation, this test assumes that psk_nonce is the psk itself...?
   external_psks = vec['external_psks'].map {
