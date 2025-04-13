@@ -264,7 +264,8 @@ end
 ## 8.1
 
 class Melos::Struct::GroupContext < Melos::Struct::Base
-  attr_reader :version, :cipher_suite, :group_id, :epoch, :tree_hash, :confirmed_transcript_hash, :extensions
+  attr_reader :version, :cipher_suite, :group_id, :epoch, :tree_hash, :confirmed_transcript_hash
+  attr_accessor :extensions
   STRUCT = [
     [:version, :uint16],
     [:cipher_suite, :uint16],

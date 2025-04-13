@@ -144,7 +144,8 @@ vectors.each_with_index do |vec, vec_index|
           [proposal_map[prop_or_ref.reference].content.proposal, proposal_map[prop_or_ref.reference].content.sender.leaf_index] # TODO: resolve leaf index
         end
       end
-      # p proposal_list.map { _1.proposal_type }
+      print "Proposal types: "
+      p proposal_list.map { Melos::Constants::ProposalType::NAMES[_1[0].proposal_type] }
 
       # puts "Tree before apply:"
       # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
@@ -157,7 +158,11 @@ vectors.each_with_index do |vec, vec_index|
       # TODO: define RatchetTree.apply_proposal() or Group.apply_proposal()
       # in this order
       # GroupContextExtensions
-      # group_context_extensions = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
+      group_context_extensions = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
+      group_context_extensions.each do |prop_tuple|
+        proposal = prop_tuple[0]
+        group_context.extensions = proposal.group_context_extensions.extensions
+      end
 
       # Update
       updates = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::UPDATE }

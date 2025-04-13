@@ -54,6 +54,11 @@ module Melos::Constants
     REINIT = 0x0005
     EXTERNAL_INIT = 0x0006
     GROUP_CONTEXT_EXTENSIONS = 0x0007
+
+    # used for debug purposes
+    NAMES = [
+      nil, 'add', 'update', 'remove', 'psk', 'reinit', 'external_init', 'group_context_extensions'
+    ]
   end
 
   module NodeType
