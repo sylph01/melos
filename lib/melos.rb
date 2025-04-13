@@ -1,7 +1,8 @@
-class Melos
+module Melos
   MLS_VERSION = 0x01 # mls10
 end
 
+require_relative 'melos/version'
 require_relative 'melos/vec'
 require_relative 'melos/tree'
 require_relative 'melos/util'
