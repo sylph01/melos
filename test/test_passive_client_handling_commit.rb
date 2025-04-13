@@ -9,7 +9,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..4]
+vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..5]
 
 vectors.each_with_index do |vec, vec_index|
   puts "vector # #{vec_index}:"
@@ -156,10 +156,13 @@ vectors.each_with_index do |vec, vec_index|
         end
         # Add
         adds = commit.proposals.select { _1.proposal&.proposal_type == Melos::Constants::ProposalType::ADD }
+        joiners = []
         adds.each do |prop|
           node = Melos::Struct::Node.new_leaf_node(prop.proposal.add.key_package.leaf_node)
-          Melos::Struct::RatchetTree.add_leaf_node(ratchet_tree, node)
+          inserted_leaf_index = Melos::Struct::RatchetTree.add_leaf_node(ratchet_tree, node)
+          joiners << inserted_leaf_index
         end
+        p joiners if joiners.count > 0
 
         # PreSharedKey
         psks = commit.proposals.select { _1.proposal&.proposal_type == Melos::Constants::ProposalType::PSK }.map { _1.proposal.psk.psk }
@@ -198,7 +201,7 @@ vectors.each_with_index do |vec, vec_index|
         if commit.path
           # decrypt the path secrets for UpdatePath
           # assumes that this client is leaf 0
-          decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, group_context)
+          decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, group_context, joiners)
           commit_secret = Melos::Struct::RatchetTree.calculate_commit_secret(suite, ratchet_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, decrypted_path_secret)
         else
           commit_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h)
@@ -236,6 +239,8 @@ vectors.each_with_index do |vec, vec_index|
         # is a private message
       end
     else
+      commit_msg = Melos::Struct::MLSMessage.new(from_hex(epoch_info['commit']))
+      p commit_msg
       puts "Currently skipping proposals.count > 0"
     end
   end

@@ -154,6 +154,8 @@ module Melos::Struct::RatchetTree
       end
       current_node_index = Melos::Tree.parent(current_node_index, tree.count)
     end
+
+    return inserted_leaf_index
   end
 
   def self.update_leaf_node(tree, node_to_update, leaf_index_of_sender)
@@ -233,7 +235,7 @@ module Melos::Struct::RatchetTree
     hashes
   end
 
-  def self.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context)
+  def self.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context, leaves_to_remove = [])
     sender_node_index = sender_leaf_index * 2
     receiver_node_index = receiver_leaf_index * 2
 
@@ -247,6 +249,7 @@ module Melos::Struct::RatchetTree
     copath_node_index = Melos::Tree.copath_nodes_of_filtered_direct_path(ratchet_tree, sender_leaf_index)[overlap_index]
     # puts "copath node: #{copath_node_index}"
     resolution_of_copath_node = Melos::Tree.resolution(ratchet_tree, copath_node_index)
+    resolution_of_copath_node = resolution_of_copath_node - leaves_to_remove.map{ _1 * 2 } # leaf index -> node index
     # puts "resolution: #{resolution_of_copath_node}"
 
     priv_key = nil
