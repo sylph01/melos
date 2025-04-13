@@ -40,24 +40,19 @@ vectors.each do |vec|
     # create node to add
     node = Melos::Struct::Node.new_leaf_node(prop.add.key_package.leaf_node)
     Melos::Struct::RatchetTree.add_leaf_node(tree_before, node)
-    # check tree equality
-    check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Add"
   elsif prop.update
     proposal_sender = vec['proposal_sender']
     # create node to update
     node = Melos::Struct::Node.new_leaf_node(prop.update.leaf_node)
     Melos::Struct::RatchetTree.update_leaf_node(tree_before, node, proposal_sender)
-    # check tree equality
-    check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Update"
   elsif prop.remove
     removed = prop.remove.removed
     Melos::Struct::RatchetTree.remove_leaf_node(tree_before, removed)
-    check_tree_equality(tree_before, tree_after)
     puts "[pass] Application of Remove"
   end
 
-  assert_equal Melos::Struct::RatchetTree.root_tree_hash(suite, tree_after), tree_hash_after
+  assert_equal Melos::Struct::RatchetTree.root_tree_hash(suite, tree_before), tree_hash_after
   puts "[pass] Verify that the tree hash of candidate_tree_after matches tree_hash_after"
 end

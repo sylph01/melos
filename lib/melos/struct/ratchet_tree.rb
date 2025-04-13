@@ -287,4 +287,17 @@ module Melos::Struct::RatchetTree
     end
     Melos::Crypto.derive_secret(suite, path_secret_n, "path") # commit secret is node's path_secret +1
   end
+
+  # just a test function
+  def self.dump_tree(tree)
+    tree.each_with_index do |node, index|
+      if node.nil?
+        puts "#{index}, nil"
+      elsif node.parent_node
+        puts "#{index}, PN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]})"
+      else
+        puts "#{index}, LN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]})"
+      end
+    end
+  end
 end

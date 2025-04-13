@@ -9,7 +9,7 @@ attr_accessor :assertions
 end
 self.assertions = 0
 
-vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..6]
+vectors = JSON.load_file('test_vectors/passive-client-handling-commit.json')[0..7]
 
 vectors.each_with_index do |vec, vec_index|
   puts "vector # #{vec_index}:"
@@ -111,6 +111,8 @@ vectors.each_with_index do |vec, vec_index|
   # process the following epochs
   vec['epochs'].each do |epoch_info|
     commit_msg = Melos::Struct::MLSMessage.new(from_hex(epoch_info['commit']))
+    # p commit_msg
+    # p leaf_index_of_current_user
     if commit_msg.public_message
       # convert list of proposals into a map of (proposalref) -> (authenticatedcontent)
       proposal_map = epoch_info['proposals']
@@ -133,16 +135,19 @@ vectors.each_with_index do |vec, vec_index|
       assert authenticated_content.verify(suite, public_key, group_context)
 
       commit = commit_msg.public_message.content.commit
-      # p commit
 
-      # convert references into actual list of proposals
+      # convert references into actual list of [proposal, sender]s
       proposal_list = commit.proposals.map do |prop_or_ref|
         if prop_or_ref.proposal
-          prop_or_ref.proposal
+          [prop_or_ref.proposal, sender_leaf_index]
         else
-          proposal_map[prop_or_ref.reference].content.proposal
+          [proposal_map[prop_or_ref.reference].content.proposal, proposal_map[prop_or_ref.reference].content.sender.leaf_index] # TODO: resolve leaf index
         end
       end
+      # p proposal_list.map { _1.proposal_type }
+
+      # puts "Tree before apply:"
+      # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
 
       # validate proposal list
       # p commit.proposals
@@ -152,33 +157,35 @@ vectors.each_with_index do |vec, vec_index|
       # TODO: define RatchetTree.apply_proposal() or Group.apply_proposal()
       # in this order
       # GroupContextExtensions
-      group_context_extensions = proposal_list.select { _1.proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
+      group_context_extensions = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS }
 
       # Update
-      updates = proposal_list.select { _1.proposal_type == Melos::Constants::ProposalType::UPDATE }
+      updates = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::UPDATE }
       updates.each do |prop|
-        node = Melos::Struct::Node.new_leaf_node(prop.update.leaf_node)
-        Melos::Struct::RatchetTree.update_leaf_node(ratchet_tree, node, sender_leaf_index)
+        proposal = prop[0]
+        node = Melos::Struct::Node.new_leaf_node(proposal.update.leaf_node)
+        Melos::Struct::RatchetTree.update_leaf_node(ratchet_tree, node, prop[1])
       end
 
       # Remove
-      removes = proposal_list.select { _1.proposal_type == Melos::Constants::ProposalType::REMOVE }
+      removes = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::REMOVE }
       removes.each do |prop|
-        removed = prop.remove.removed
+        proposal = prop[0]
+        removed = proposal.remove.removed
         Melos::Struct::RatchetTree.remove_leaf_node(ratchet_tree, removed)
       end
       # Add
-      adds = proposal_list.select { _1.proposal_type == Melos::Constants::ProposalType::ADD }
+      adds = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::ADD }
       joiners = []
       adds.each do |prop|
-        node = Melos::Struct::Node.new_leaf_node(prop.add.key_package.leaf_node)
+        proposal = prop[0]
+        node = Melos::Struct::Node.new_leaf_node(proposal.add.key_package.leaf_node)
         inserted_leaf_index = Melos::Struct::RatchetTree.add_leaf_node(ratchet_tree, node)
         joiners << inserted_leaf_index
       end
-      p joiners if joiners.count > 0
 
       # PreSharedKey
-      psks = proposal_list.select { _1.proposal_type == Melos::Constants::ProposalType::PSK }.map { _1.psk.psk }
+      psks = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::PSK }.map { _1[0].psk.psk }
       psks = psks.map {
         if _1.psktype == Melos::Constants::PSKType::EXTERNAL
           [_1.raw, external_psks[_1.psk_id]]
@@ -193,6 +200,18 @@ vectors.each_with_index do |vec, vec_index|
 
       # ReInit
 
+      # puts "Tree after apply:"
+      # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
+
+      group_context = Melos::Struct::GroupContext.create(
+        cipher_suite: group_context.cipher_suite,
+        group_id: group_context.group_id,
+        epoch: group_context.epoch,
+        tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
+        confirmed_transcript_hash: group_context.confirmed_transcript_hash, # provisional
+        extensions: group_context.extensions # assume no GroupContextExtensions proposal
+      )
+
       # Verify that the path value is populated if the proposals vector contains any Update or Remove proposals, or if it's empty. Otherwise, the path value MAY be omitted.
 
       # If the path value is populated, validate it and apply it to the tree:
@@ -200,21 +219,21 @@ vectors.each_with_index do |vec, vec_index|
       # p commit
       if commit.path
         Melos::Struct::RatchetTree.merge_update_path(suite, ratchet_tree, sender_leaf_index, commit.path)
-      end
 
-      group_context = Melos::Struct::GroupContext.create(
-        cipher_suite: group_context.cipher_suite,
-        group_id: group_context.group_id,
-        epoch: group_context.epoch + 1,
-        tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
-        confirmed_transcript_hash: group_context.confirmed_transcript_hash, # provisional
-        extensions: group_context.extensions # assume no GroupContextExtensions proposal
-      )
+        provisional_group_context = Melos::Struct::GroupContext.create(
+          cipher_suite: group_context.cipher_suite,
+          group_id: group_context.group_id,
+          epoch: group_context.epoch + 1,
+          tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
+          confirmed_transcript_hash: group_context.confirmed_transcript_hash, # provisional
+          extensions: group_context.extensions # assume no GroupContextExtensions proposal
+        )
+        # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
+        # puts "root hash: " + to_hex(Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree))
 
-      if commit.path
         # decrypt the path secrets for UpdatePath
         # assumes that this client is leaf 0
-        decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, group_context, joiners)
+        decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, provisional_group_context, joiners)
         commit_secret = Melos::Struct::RatchetTree.calculate_commit_secret(suite, ratchet_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, decrypted_path_secret)
       else
         commit_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h)
@@ -228,14 +247,13 @@ vectors.each_with_index do |vec, vec_index|
       group_context = Melos::Struct::GroupContext.create(
         cipher_suite: group_context.cipher_suite,
         group_id: group_context.group_id,
-        epoch: group_context.epoch,
-        tree_hash: group_context.tree_hash,
+        epoch: group_context.epoch + 1,
+        tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
         confirmed_transcript_hash: confirmed_transcript_hash,
         extensions: group_context.extensions
       )
 
       # derive the PSK secret
-      # assume empty
       psk_secret = Melos::PSK.psk_secret(suite, psks)
 
       # calculate joiner, welcome, epoch secret

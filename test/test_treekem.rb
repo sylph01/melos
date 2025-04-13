@@ -30,19 +30,6 @@ def verify_parent_hash_of_path(suite, ratchet_tree, leaf_index_from, update_path
   update_path.leaf_node.parent_hash == calculated_parent_hash
 end
 
-# just a test function
-def list_node_type(tree)
-  tree.each_with_index do |node, index|
-    if node.nil?
-      puts "#{index}, nil"
-    elsif node.parent_node
-      puts "#{index}, PN"
-    else
-      puts "#{index}, LN"
-    end
-  end
-end
-
 if ENV['TEST_ALL']
   vectors = JSON.load_file('test_vectors/treekem.json')
 else
