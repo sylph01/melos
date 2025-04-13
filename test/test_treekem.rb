@@ -104,11 +104,6 @@ vectors.each_with_index do |vector, tree_index|
       extensions: []
     )
 
-    # puts "fdp: #{Melos::Tree.filtered_direct_path(new_tree, sender)}"
-    # puts "copath_nodes: #{Melos::Tree.copath_nodes_of_filtered_direct_path(new_tree, sender)}"
-    # p Melos::Tree.copath_nodes_of_filtered_direct_path(new_tree, sender).map { Melos::Tree.resolution(new_tree, _1) }
-    # pp update_path.nodes.map{ _1.encrypted_path_secret.count }
-    # pp encryption_priv_tree
     up['path_secrets'].each_with_index do |path_secret, j_index|
       next if sender == j_index
       puts "receiver: #{j_index} (node: #{j_index * 2})"
@@ -130,7 +125,7 @@ vectors.each_with_index do |vector, tree_index|
     another_new_tree = ratchet_tree.dup
     original_leaf_node = another_new_tree[sender * 2]
     leaf_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h) # actually make it with a random value
-    fdp = Melos::Tree.filtered_direct_path(another_new_tree, sender)
+    fdp = Melos::Tree.filtered_direct_path(another_new_tree, sender * 2)
     path_secrets = []
     current_path_secret = leaf_secret
     fdp.each do
@@ -173,7 +168,7 @@ vectors.each_with_index do |vector, tree_index|
     Melos::Struct::RatchetTree.merge_update_path(suite, another_new_tree, sender, update_path)
 
     except = [] # TODO: unused for now, use this to remove leaves from resolution
-    copath_nodes = Melos::Tree.copath_nodes_of_filtered_direct_path(another_new_tree, sender)
+    copath_nodes = Melos::Tree.copath_nodes_of_filtered_direct_path(another_new_tree, sender * 2)
     update_path_nodes = []
     fdp.each_with_index do |fdp_node_index, array_index|
       copath_node_index = copath_nodes[array_index]

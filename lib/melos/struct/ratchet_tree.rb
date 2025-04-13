@@ -194,7 +194,7 @@ module Melos::Struct::RatchetTree
 
   def self.merge_update_path(suite, ratchet_tree, leaf_index, update_path)
     node_index_of_leaf = leaf_index * 2
-    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, leaf_index)
+    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, node_index_of_leaf)
     nodes_from_update_path = update_path.nodes
 
     parent_hashes = calculate_parent_hashes(suite, ratchet_tree, leaf_index, update_path.nodes)
@@ -215,7 +215,7 @@ module Melos::Struct::RatchetTree
 
   def self.calculate_parent_hashes(suite, ratchet_tree, leaf_index_from, update_path_nodes)
     hashes = []
-    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, leaf_index_from)
+    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, leaf_index_from * 2)
     # count down from root, calculate parent hash
     calculated_parent_hash = ""
     # node_index = Melos::Tree.root(Melos::Tree.n_leaves(ratchet_tree))
@@ -238,14 +238,15 @@ module Melos::Struct::RatchetTree
   def self.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context, leaves_to_remove = [])
     receiver_node_index = receiver_leaf_index * 2
 
-    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
+    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index * 2)
     # puts "filtered direct path: #{filtered_direct_path}"
     raise ArgumentError.new('malformed update path') unless filtered_direct_path.count == update_path.nodes.count
     overlap_node = Melos::Tree.overlap_with_filtered_direct_path(receiver_node_index, filtered_direct_path, Melos::Tree.n_leaves(ratchet_tree))
     # puts "overlap node: #{overlap_node}"
-    overlap_index = filtered_direct_path.find_index { _1 == overlap_node}
+    overlap_index = filtered_direct_path.find_index { _1 == overlap_node }
+    overlap_node_index = filtered_direct_path[overlap_index]
     # puts "overlap index: #{overlap_index}"
-    copath_node_index = Melos::Tree.copath_nodes_of_filtered_direct_path(ratchet_tree, sender_leaf_index)[overlap_index]
+    copath_node_index = Melos::Tree.copath_nodes_of_filtered_direct_path(ratchet_tree, sender_leaf_index * 2)[overlap_index]
     # puts "copath node: #{copath_node_index}"
     resolution_of_copath_node = Melos::Tree.resolution(ratchet_tree, copath_node_index)
     resolution_of_copath_node = resolution_of_copath_node - leaves_to_remove.map{ _1 * 2 } # leaf index -> node index
@@ -260,18 +261,41 @@ module Melos::Struct::RatchetTree
       end
     end
 
-    raise ArgumentError.new('priv key not found in tree') if priv_key.nil?
+    if priv_key.nil?
+      raise ArgumentError.new("priv key not found in tree (sender leaf index: #{sender_leaf_index})")
+    end
     target_update_path_node = update_path.nodes[overlap_index]
     target_encrypted_path_secret = target_update_path_node.encrypted_path_secret[priv_index]
     raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless target_update_path_node.encrypted_path_secret.count == resolution_of_copath_node.count
 
-    Melos::Crypto.decrypt_with_label(suite, priv_key, "UpdatePathNode", group_context.raw, target_encrypted_path_secret.kem_output, target_encrypted_path_secret.ciphertext)
+    # puts "priv_key: #{to_hex priv_key}"
+    path_secret = Melos::Crypto.decrypt_with_label(suite, priv_key, "UpdatePathNode", group_context.raw, target_encrypted_path_secret.kem_output, target_encrypted_path_secret.ciphertext)
+
+    # place private keys based on path secret
+    update_encryption_priv_tree(suite, ratchet_tree, encryption_priv_tree, overlap_node_index, path_secret)
+
+    path_secret
+  end
+
+  def self.update_encryption_priv_tree(suite, ratchet_tree, encryption_priv_tree, start, path_secret)
+    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, start)
+    secret = path_secret
+    filtered_direct_path = [start] + filtered_direct_path
+
+    filtered_direct_path.each do |n_i|
+      node_secret = Melos::Crypto.derive_secret(suite, secret, "node")
+      encryption_priv, encryption_pub = Melos::Crypto.derive_key_pair(suite, node_secret)
+      encryption_priv_tree[n_i] = encryption_priv
+      # puts "n_i #{n_i}: ps: #{to_hex secret} -> ns: #{to_hex node_secret} -> pub: #{to_hex encryption_pub}"
+      # p Melos::Crypto.encapsulation_key_pair_corresponds?(suite, encryption_priv, ratchet_tree[n_i].public_encryption_key)
+      secret = Melos::Crypto.derive_secret(suite, secret, "path")
+    end
   end
 
   def self.calculate_commit_secret(suite, ratchet_tree, update_path, sender_leaf_index, receiver_leaf_index, path_secret)
     receiver_node_index = receiver_leaf_index * 2
 
-    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index)
+    filtered_direct_path = Melos::Tree.filtered_direct_path(ratchet_tree, sender_leaf_index * 2)
     raise ArgumentError.new('malformed update path') unless filtered_direct_path.count == update_path.nodes.count
     overlap_node = Melos::Tree.overlap_with_filtered_direct_path(receiver_node_index, filtered_direct_path, Melos::Tree.n_leaves(ratchet_tree))
     overlap_index = filtered_direct_path.find_index { _1 == overlap_node}
@@ -291,10 +315,7 @@ module Melos::Struct::RatchetTree
       if node.nil?
         puts "#{index}, nil"
       elsif node.parent_node
-        puts "#{index}, PN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]}) "
-        if node.parent_node.unmerged_leaves
-          puts " - #{node.parent_node.unmerged_leaves}"
-        end
+        puts "#{index}, PN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]}) - #{node.parent_node.unmerged_leaves}"
       else
         puts "#{index}, LN (#{Melos::Util.to_hex(node.public_encryption_key)[0, 8]})"
       end

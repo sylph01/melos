@@ -211,15 +211,14 @@ class Melos::Tree
       # right half of tree has an element, so finish
     end
 
-    def filtered_direct_path(tree, leaf_index)
-      node_index = leaf_index * 2
+    def filtered_direct_path(tree, node_index)
       n_l = n_leaves(tree)
       direct_path(node_index, n_l).reject { resolution(tree, sibling_from_leaf(node_index, _1, n_l)) == [] }
     end
 
-    def copath_nodes_of_filtered_direct_path(tree, leaf_index)
-      filtered_direct_path(tree, leaf_index).map do |a|
-        sibling_from_leaf(leaf_index * 2, a, n_leaves(tree))
+    def copath_nodes_of_filtered_direct_path(tree, node_index)
+      filtered_direct_path(tree, node_index).map do |a|
+        sibling_from_leaf(node_index, a, n_leaves(tree))
       end
     end
 
