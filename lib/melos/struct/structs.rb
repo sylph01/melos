@@ -638,18 +638,18 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
   ]
 
   # initialize from stream
-  def self.new_and_rest_with_content_type(buf, content_type)
+  def self.new_and_rest_with_content_type(stream, content_type)
     instance = self.allocate
-    context, buf = instance.send(:deserialize, buf)
+    context = instance.send(:deserialize, stream)
     # custom part based on instance variable
     if content_type == Melos::Constants::ContentType::COMMIT # commit
       # read MAC(opaque <V>) confirmation_tag
-      value, buf = Melos::Vec.parse_vec(buf)
+      value = Melos::Vec.parse_stringio(stream)
       context << [:confirmation_tag, value]
     end
     context << [:content_type, content_type]
     instance.send(:set_instance_vars, context)
-    [instance, buf]
+    instance
   end
 
   def raw
