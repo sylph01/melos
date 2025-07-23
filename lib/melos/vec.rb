@@ -59,4 +59,34 @@ module Melos::Vec
 
     [str, rest]
   end
+
+  def parse_stringio(vec_as_stringio)
+    prefix = prefix_from_stringio(vec_as_stringio)
+    length = length_from_stringio(vec_as_stringio)
+    case prefix
+    when 0..2
+      vec_as_stringio.pos = (vec_as_stringio.pos + (2 ** prefix))
+      str = vec_as_stringio.read(length)
+    else
+      raise ArgumentError.new('invalid header')
+    end
+
+    str
+  end
+
+  private
+
+  def prefix_from_stringio(stringio)
+    pos = stringio.pos
+    prefix_ = stringio.getbyte >> 6
+    stringio.seek(pos)
+    prefix_
+  end
+
+  def length_from_stringio(stringio)
+    pos = stringio.pos
+    buf = stringio.read(4)
+    stringio.seek(pos)
+    read_varint(buf)
+  end
 end
