@@ -66,24 +66,4 @@ module Melos::Vec
 
     [str, rest]
   end
-
-  def get_first_vec(vec_as_string)
-    prefix = vec[0].ord >> 6
-    length = read_varint(vec_as_string)
-    case prefix
-    when 0
-      first_vec = vec_as_string[0, 1 + length]
-      rest = vec_as_string[(1 + length)..]
-    when 1
-      first_vec = vec_as_string[0, 2 + length]
-      rest = vec_as_string[(2 + length)..]
-    when 2
-      first_vec = vec_as_string[0, 4 + length]
-      rest = vec_as_string[(4 + length)..]
-    else
-      raise ArgumentError.new('invalid header')
-    end
-
-    [first_vec, rest]
-  end
 end
