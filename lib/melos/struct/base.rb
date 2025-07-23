@@ -74,9 +74,9 @@ class Melos::Struct::Base
     when :uint64
       value = stream.read(8).unpack1('Q>')
     when :vec
-      value = Melos::Vec.parse_vec(stream)
+      value = Melos::Vec.parse_stringio(stream)
     when :vec_of_type
-      data = Melos::Vec.parse_vec(stream)
+      data = Melos::Vec.parse_stringio(stream)
       value = []
       data_stream = StringIO.new(data)
       while (!data_stream.eof?)
@@ -86,7 +86,7 @@ class Melos::Struct::Base
     when :class
       value = type_param.send(:new_and_rest, stream)
     when :classes
-      data = Melos::Vec.parse_vec(stream)
+      data = Melos::Vec.parse_stringio(stream)
       value = []
       data_stream = StringIO.new(data)
       while (!data_stream.eof?)
