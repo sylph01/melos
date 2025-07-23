@@ -29,16 +29,6 @@ class Melos::Struct::Base
     buf
   end
 
-  def self.vecs(buf)
-    value, buf = Melos::Vec.parse_vec(buf)
-    array = []
-    while (value.bytesize > 0)
-      current_instance, value = Melos::Vec.parse_vec(value)
-      array << current_instance
-    end
-    [array, buf]
-  end
-
   # context here takes a hash
   # returns [value, rest_of_buffer]
   # value could return nil, which means predicate was not applicable
