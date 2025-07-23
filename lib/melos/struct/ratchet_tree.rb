@@ -6,26 +6,26 @@ require_relative '../tree'
 require_relative '../crypto'
 
 module Melos::Struct::RatchetTree
-  def self.parse(vec)
-    array, _ = new_and_rest(vec)
-    array
+  def self.parse(stream)
+    stream = StringIO.new(stream) if stream.is_a?(String)
+    new_and_rest(stream)
   end
 
-  def self.new_and_rest(vec)
+  def self.new_and_rest(stream)
     array = []
-    buf, rest = Melos::Vec.parse_vec(vec)
-    while buf.bytesize > 0
-      presence = buf.byteslice(0, 1).unpack1('C')
-      buf = buf.byteslice(1..)
+    data = Melos::Vec.parse_stringio(stream)
+    data_stream = StringIO.new(data)
+    while !data_stream.eof?
+      presence = data_stream.read(1).unpack1('C')
       case presence
       when 0
         array << nil
       when 1
-        node, buf = Melos::Struct::Node.new_and_rest(buf)
+        node = Melos::Struct::Node.new_and_rest(data_stream)
         array << node
       end
     end
-    [array, rest]
+    array
   end
 
   def self.raw(array)

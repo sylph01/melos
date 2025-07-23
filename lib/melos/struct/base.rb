@@ -2,6 +2,7 @@ module Melos::Struct; end
 
 class Melos::Struct::Base
   def initialize(stream)
+    stream = StringIO.new(stream) if stream.is_a?(String)
     context = deserialize(stream)
     set_instance_vars(context)
     self
@@ -32,7 +33,7 @@ class Melos::Struct::Base
   # predicate takes the context and returns true or false
   def deserialize_select_elem_with_context(stream, context, predicate, type, type_param)
     if predicate.(context)
-      deserialize_elem(buf, type, type_param)
+      deserialize_elem(stream, type, type_param)
     else
       nil
     end

@@ -887,7 +887,8 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     sender_data = decrypt_sender_data(suite, sender_data_secret)
     key, nonce, _ = Melos::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
-    pmc, _ = Melos::Struct::PrivateMessageContent.new_and_rest_with_content_type(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext), content_type)
+    stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
+    pmc = Melos::Struct::PrivateMessageContent.new_and_rest_with_content_type(stream, content_type)
 
     fc = Melos::Struct::FramedContent.create(
       group_id: group_id,
@@ -945,27 +946,27 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
   # bytes -> struct: decode the content and auth field, rest is padding
   # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
 
-  def self.new_and_rest_with_content_type(buf, content_type)
+  def self.new_and_rest_with_content_type(stream, content_type)
     instance = self.allocate
     context = []
     # deserialize application_data/proposal/commit
     case content_type
     when Melos::Constants::ContentType::APPLICATION
-      value, buf = Melos::Vec.parse_vec(buf)
+      value = Melos::Vec.parse_stringio(stream)
       context << [:application_data, value]
     when Melos::Constants::ContentType::PROPOSAL
-      value, buf = Melos::Struct::Proposal.new_and_rest(buf)
+      value = Melos::Struct::Proposal.new_and_rest(stream)
       context << [:proposal, value]
     when Melos::Constants::ContentType::COMMIT
-      value, buf = Melos::Struct::Commit.new_and_rest(buf)
+      value = Melos::Struct::Commit.new_and_rest(stream)
       context << [:commit, value]
     end
-    fcad, buf = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(buf, content_type)
+    fcad = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(stream, content_type)
     context << [:auth, fcad]
     # assume rest is padding
-    context << [:padding, buf]
+    context << [:padding, stream.read()]
     instance.send(:set_instance_vars, context)
-    [instance, '']
+    instance
   end
 
   def content
