@@ -40,13 +40,6 @@ module Melos::Vec
     write_varint(str.bytesize) + str
   end
 
-  def get_prefix_and_length(str)
-    prefix = str[0].ord >> 6
-    length = read_varint(str)
-
-    [prefix, length]
-  end
-
   def parse_vec(vec_as_string)
     prefix = vec_as_string[0].ord >> 6
     length = read_varint(vec_as_string)

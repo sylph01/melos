@@ -102,8 +102,6 @@ class Melos::Struct::Base
     when :class
       value, buf = type_param.send(:new_and_rest, buf)
     when :classes
-      # prefix, length = buf.get_prefix_and_length
-      # puts "#{prefix}, #{length}"
       vec, buf = Melos::Vec.parse_vec(buf)
       value = []
       while (vec.bytesize > 0)
