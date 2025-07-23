@@ -1,17 +1,14 @@
 module Melos::Struct; end
 
 class Melos::Struct::Base
-  def initialize(buf)
-    context, _ = deserialize(buf)
+  def initialize(stream)
+    context = deserialize(stream)
     set_instance_vars(context)
     self
   end
 
-  def self.new_and_rest(buf)
-    instance = self.allocate
-    context, buf = instance.send(:deserialize, buf)
-    instance.send(:set_instance_vars, context)
-    [instance, buf]
+  def self.new_and_rest(stream)
+    self.new(stream)
   end
 
   def raw
@@ -33,31 +30,31 @@ class Melos::Struct::Base
   # returns [value, rest_of_buffer]
   # value could return nil, which means predicate was not applicable
   # predicate takes the context and returns true or false
-  def deserialize_select_elem_with_context(buf, context, predicate, type, type_param)
+  def deserialize_select_elem_with_context(stream, context, predicate, type, type_param)
     if predicate.(context)
       deserialize_elem(buf, type, type_param)
     else
-      [nil, buf]
+      nil
     end
   end
 
   private
-  def deserialize(buf)
+  def deserialize(stream)
     context = []
     self.class::STRUCT.each do |elem|
       case elem[1]
       when :select
-        value, buf = deserialize_select_elem_with_context(buf, context.to_h, elem[2], elem[3], elem[4])
+        value = deserialize_select_elem_with_context(stream, context.to_h, elem[2], elem[3], elem[4])
         context << [elem[0], value]
       when :framed_content_auth_data
-        value, buf = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(buf, context.to_h[:content].content_type)
+        value = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(stream, context.to_h[:content].content_type)
         context << [elem[0], value]
       else
-        value, buf = deserialize_elem(buf, elem[1], elem[2])
+        value = deserialize_elem(stream, elem[1], elem[2])
         context << [elem[0], value]
       end
     end
-    [context, buf]
+    context
   end
 
   def set_instance_vars(context)
@@ -66,55 +63,51 @@ class Melos::Struct::Base
     end
   end
 
-  def deserialize_elem(buf, type, type_param)
+  def deserialize_elem(stream, type, type_param)
     case type
     when :uint8
-      value = buf.byteslice(0, 1).unpack1('C')
-      buf = buf.byteslice(1..)
+      value = stream.read(1).unpack1('C')
     when :uint16
-      value = buf.byteslice(0, 2).unpack1('S>')
-      buf = buf.byteslice(2..)
+      value = stream.read(2).unpack1('S>')
     when :uint32
-      value = buf.byteslice(0, 4).unpack1('L>')
-      buf = buf.byteslice(4..)
+      value = stream.read(4).unpack1('L>')
     when :uint64
-      value = buf.byteslice(0, 8).unpack1('Q>')
-      buf = buf.byteslice(8..)
+      value = stream.read(8).unpack1('Q>')
     when :vec
-      value, buf = Melos::Vec.parse_vec(buf)
+      value = Melos::Vec.parse_vec(stream)
     when :vec_of_type
-      vec, buf = Melos::Vec.parse_vec(buf)
+      data = Melos::Vec.parse_vec(stream)
       value = []
-      while (vec.bytesize > 0)
-        current_instance, vec = deserialize_elem(vec, type_param, nil)
+      data_stream = StringIO.new(data)
+      while (!data_stream.eof?)
+        current_instance = deserialize_elem(data_stream, type_param, nil)
         value << current_instance
       end
     when :class
-      value, buf = type_param.send(:new_and_rest, buf)
+      value = type_param.send(:new_and_rest, stream)
     when :classes
-      vec, buf = Melos::Vec.parse_vec(buf)
+      data = Melos::Vec.parse_vec(stream)
       value = []
-      while (vec.bytesize > 0)
-        current_instance, vec = type_param.send(:new_and_rest, vec)
+      data_stream = StringIO.new(data)
+      while (!data_stream.eof?)
+        current_instance = type_param.send(:new_and_rest, data_stream)
         value << current_instance
       end
     when :optional
-      presence = buf.byteslice(0, 1).unpack1('C')
-      buf = buf.byteslice(1..)
+      presence = stream.read(1).unpack1('C')
       case presence
       when 0
         value = nil
       when 1
         # as of RFC 9420, optional always takes a class
-        value, buf = type_param.send(:new_and_rest, buf)
+        value = type_param.send(:new_and_rest, stream)
       end
     when :opaque
-      value = buf.byteslice(0, type_param.to_i)
-      buf = buf.byteslice((type_param.to_i)..)
+      value = stream.read(type_param.to_i)
     when :padding
-      value = buf
+      value = stream.read
     end
-    [value, buf]
+    value
   end
 
   # take a name and type
