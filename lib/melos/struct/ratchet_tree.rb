@@ -8,10 +8,10 @@ require_relative '../crypto'
 module Melos::Struct::RatchetTree
   def self.parse(stream)
     stream = StringIO.new(stream) if stream.is_a?(String)
-    new_and_rest(stream)
+    new(stream)
   end
 
-  def self.new_and_rest(stream)
+  def self.new(stream)
     array = []
     data = Melos::Vec.parse_stringio(stream)
     data_stream = StringIO.new(data)
@@ -21,7 +21,7 @@ module Melos::Struct::RatchetTree
       when 0
         array << nil
       when 1
-        node = Melos::Struct::Node.new_and_rest(data_stream)
+        node = Melos::Struct::Node.new(data_stream)
         array << node
       end
     end

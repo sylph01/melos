@@ -8,10 +8,6 @@ class Melos::Struct::Base
     self
   end
 
-  def self.new_and_rest(stream)
-    self.new(stream)
-  end
-
   def raw
     buf = ''
     self.class::STRUCT.each do |elem|
@@ -48,7 +44,7 @@ class Melos::Struct::Base
         value = deserialize_select_elem_with_context(stream, context.to_h, elem[2], elem[3], elem[4])
         context << [elem[0], value]
       when :framed_content_auth_data
-        value = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(stream, context.to_h[:content].content_type)
+        value = Melos::Struct::FramedContentAuthData.new_with_content_type(stream, context.to_h[:content].content_type)
         context << [elem[0], value]
       else
         value = deserialize_elem(stream, elem[1], elem[2])
@@ -85,13 +81,13 @@ class Melos::Struct::Base
         value << current_instance
       end
     when :class
-      value = type_param.send(:new_and_rest, stream)
+      value = type_param.send(:new, stream)
     when :classes
       data = Melos::Vec.parse_stringio(stream)
       value = []
       data_stream = StringIO.new(data)
       while (!data_stream.eof?)
-        current_instance = type_param.send(:new_and_rest, data_stream)
+        current_instance = type_param.send(:new, data_stream)
         value << current_instance
       end
     when :optional
@@ -101,7 +97,7 @@ class Melos::Struct::Base
         value = nil
       when 1
         # as of RFC 9420, optional always takes a class
-        value = type_param.send(:new_and_rest, stream)
+        value = type_param.send(:new, stream)
       end
     when :opaque
       value = stream.read(type_param.to_i)

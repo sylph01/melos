@@ -638,7 +638,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
   ]
 
   # initialize from stream
-  def self.new_and_rest_with_content_type(stream, content_type)
+  def self.new_with_content_type(stream, content_type)
     instance = self.allocate
     context = instance.send(:deserialize, stream)
     # custom part based on instance variable
@@ -888,7 +888,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     key, nonce, _ = Melos::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
     stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
-    pmc = Melos::Struct::PrivateMessageContent.new_and_rest_with_content_type(stream, content_type)
+    pmc = Melos::Struct::PrivateMessageContent.new_with_content_type(stream, content_type)
 
     fc = Melos::Struct::FramedContent.create(
       group_id: group_id,
@@ -946,7 +946,7 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
   # bytes -> struct: decode the content and auth field, rest is padding
   # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
 
-  def self.new_and_rest_with_content_type(stream, content_type)
+  def self.new_with_content_type(stream, content_type)
     instance = self.allocate
     context = []
     # deserialize application_data/proposal/commit
@@ -955,13 +955,13 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
       value = Melos::Vec.parse_stringio(stream)
       context << [:application_data, value]
     when Melos::Constants::ContentType::PROPOSAL
-      value = Melos::Struct::Proposal.new_and_rest(stream)
+      value = Melos::Struct::Proposal.new(stream)
       context << [:proposal, value]
     when Melos::Constants::ContentType::COMMIT
-      value = Melos::Struct::Commit.new_and_rest(stream)
+      value = Melos::Struct::Commit.new(stream)
       context << [:commit, value]
     end
-    fcad = Melos::Struct::FramedContentAuthData.new_and_rest_with_content_type(stream, content_type)
+    fcad = Melos::Struct::FramedContentAuthData.new_with_content_type(stream, content_type)
     context << [:auth, fcad]
     # assume rest is padding
     context << [:padding, stream.read()]
