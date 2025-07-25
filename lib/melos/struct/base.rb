@@ -24,7 +24,7 @@ class Melos::Struct::Base
   end
 
   # context here takes a hash
-  # returns [value, rest_of_buffer]
+  # returns the deserialized value
   # value could return nil, which means predicate was not applicable
   # predicate takes the context and returns true or false
   def deserialize_select_elem_with_context(stream, context, predicate, type, type_param)
