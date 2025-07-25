@@ -13,7 +13,7 @@ module Melos::Struct::RatchetTree
 
   def self.new(stream)
     array = []
-    data = Melos::Vec.parse_stringio(stream)
+    data = Melos::Vec.parse(stream)
     data_stream = StringIO.new(data)
     while !data_stream.eof?
       presence = data_stream.read(1).unpack1('C')

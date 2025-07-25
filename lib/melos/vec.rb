@@ -40,13 +40,14 @@ module Melos::Vec
     write_varint(str.bytesize) + str
   end
 
-  def parse_stringio(vec_as_stringio)
-    prefix = prefix_from_stringio(vec_as_stringio)
-    length = length_from_stringio(vec_as_stringio)
+  # sig { params(stream: StringIO).returns(String) }
+  def parse(stream)
+    prefix = prefix_from_stringio(stream)
+    length = length_from_stringio(stream)
     case prefix
     when 0..2
-      vec_as_stringio.pos = (vec_as_stringio.pos + (2 ** prefix))
-      str = vec_as_stringio.read(length)
+      stream.pos = (stream.pos + (2 ** prefix))
+      str = stream.read(length)
     else
       raise ArgumentError.new('invalid header')
     end
