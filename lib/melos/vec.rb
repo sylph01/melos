@@ -40,26 +40,6 @@ module Melos::Vec
     write_varint(str.bytesize) + str
   end
 
-  def parse_vec(vec_as_string)
-    prefix = vec_as_string[0].ord >> 6
-    length = read_varint(vec_as_string)
-    case prefix
-    when 0
-      str = vec_as_string.byteslice(1, length)
-      rest = vec_as_string.byteslice((1 + length)..)
-    when 1
-      str = vec_as_string.byteslice(2, length)
-      rest = vec_as_string.byteslice((2 + length)..)
-    when 2
-      str = vec_as_string[4, length]
-      rest = vec_as_string[(4 + length)..]
-    else
-      raise ArgumentError.new('invalid header')
-    end
-
-    [str, rest]
-  end
-
   def parse_stringio(vec_as_stringio)
     prefix = prefix_from_stringio(vec_as_stringio)
     length = length_from_stringio(vec_as_stringio)
