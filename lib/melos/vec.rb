@@ -42,9 +42,9 @@ module Melos::Vec
   end
 
   # sig { params(stream: StringIO).returns(String) }
-  def parse(stream)
-    prefix = prefix_from_stringio(stream)
-    length = length_from_stringio(stream)
+  def parse_stream(stream)
+    prefix = prefix_from_stream(stream)
+    length = length_from_stream(stream)
     case prefix
     when 0..2
       stream.pos = (stream.pos + (2 ** prefix))
@@ -58,14 +58,14 @@ module Melos::Vec
 
   private
 
-  def prefix_from_stringio(stringio)
+  def prefix_from_stream(stringio)
     pos = stringio.pos
     prefix_ = stringio.getbyte >> 6
     stringio.seek(pos)
     prefix_
   end
 
-  def length_from_stringio(stringio)
+  def length_from_stream(stringio)
     pos = stringio.pos
     buf = stringio.read(4)
     stringio.seek(pos)

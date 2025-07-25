@@ -644,7 +644,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
     # custom part based on instance variable
     if content_type == Melos::Constants::ContentType::COMMIT # commit
       # read MAC(opaque <V>) confirmation_tag
-      value = Melos::Vec.parse(stream)
+      value = Melos::Vec.parse_stream(stream)
       context << [:confirmation_tag, value]
     end
     context << [:content_type, content_type]
@@ -952,7 +952,7 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
     # deserialize application_data/proposal/commit
     case content_type
     when Melos::Constants::ContentType::APPLICATION
-      value = Melos::Vec.parse(stream)
+      value = Melos::Vec.parse_stream(stream)
       context << [:application_data, value]
     when Melos::Constants::ContentType::PROPOSAL
       value = Melos::Struct::Proposal.new(stream)
