@@ -36,7 +36,8 @@ module Melos::Vec
     header.pack('C*')
   end
 
-  def from_string(str) # = to_vec
+  # Adds variable length header to string, thus making it a variable length vector
+  def string_to_vec(str)
     write_varint(str.bytesize) + str
   end
 

@@ -118,19 +118,19 @@ class Melos::Struct::LeafNode < Melos::Struct::Base
 
   def leaf_node_tbs(group_id, leaf_index)
     buf = ''
-    buf += Melos::Vec.from_string(encryption_key)
-    buf += Melos::Vec.from_string(signature_key)
+    buf += Melos::Vec.string_to_vec(encryption_key)
+    buf += Melos::Vec.string_to_vec(signature_key)
     buf += credential.raw
     buf += capabilities.raw
     buf += [leaf_node_source].pack('C')
     if leaf_node_source == Melos::Constants::LeafNodeSource::KEY_PACKAGE
       buf += lifetime.raw
     elsif leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
-      buf += Melos::Vec.from_string(parent_hash)
+      buf += Melos::Vec.string_to_vec(parent_hash)
     end
-    buf += Melos::Vec.from_string(extensions.map(&:raw).join)
+    buf += Melos::Vec.string_to_vec(extensions.map(&:raw).join)
     if leaf_node_source == Melos::Constants::LeafNodeSource::UPDATE || leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
-      buf += Melos::Vec.from_string(group_id)
+      buf += Melos::Vec.string_to_vec(group_id)
       buf += [leaf_index].pack('L>') # uint32
     end
     buf
@@ -654,9 +654,9 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
 
   def raw
     if @content_type == Melos::Constants::ContentType::COMMIT
-      Melos::Vec.from_string(@signature) + Melos::Vec.from_string(@confirmation_tag)
+      Melos::Vec.string_to_vec(@signature) + Melos::Vec.string_to_vec(@confirmation_tag)
     else
-      Melos::Vec.from_string(@signature)
+      Melos::Vec.string_to_vec(@signature)
     end
   end
 
@@ -834,7 +834,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
   end
 
   def self.sender_data_aad_impl(gid, ep, ct)
-    Melos::Vec.from_string(gid) + [ep].pack('Q>') + [ct].pack('C')
+    Melos::Vec.string_to_vec(gid) + [ep].pack('Q>') + [ct].pack('C')
   end
 
   def private_content_aad
@@ -842,7 +842,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
   end
 
   def self.private_content_aad_impl(gid, ep, ct, ad)
-    Melos::Vec.from_string(gid) + [ep].pack('Q>') + [ct].pack('C') + Melos::Vec.from_string(ad)
+    Melos::Vec.string_to_vec(gid) + [ep].pack('Q>') + [ct].pack('C') + Melos::Vec.string_to_vec(ad)
   end
 
   def self.protect(authenticated_content, suite, secret_tree, sender_data_secret, padding_size)
@@ -926,15 +926,15 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     buf = ''
     case framed_content.content_type
     when Melos::Constants::ContentType::APPLICATION
-      buf += Melos::Vec.from_string(framed_content.application_data)
+      buf += Melos::Vec.string_to_vec(framed_content.application_data)
     when Melos::Constants::ContentType::PROPOSAL
       buf += framed_content.proposal.raw
     when Melos::Constants::ContentType::COMMIT
       buf += framed_content.commit.raw
     end
-    buf += Melos::Vec.from_string(framed_content_auth_data.signature)
+    buf += Melos::Vec.string_to_vec(framed_content_auth_data.signature)
     if framed_content.content_type == Melos::Constants::ContentType::COMMIT
-      buf += Melos::Vec.from_string(framed_content_auth_data.confirmation_tag)
+      buf += Melos::Vec.string_to_vec(framed_content_auth_data.confirmation_tag)
     end
     buf += Melos::Crypto::Util.zero_vector(padding_size)
     buf

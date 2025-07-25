@@ -39,7 +39,7 @@ module Melos::Struct::RatchetTree
       end
     end
 
-    Melos::Vec.from_string(buf)
+    Melos::Vec.string_to_vec(buf)
   end
 
   def self.tree_hash(tree, node_index, suite)
@@ -63,8 +63,8 @@ module Melos::Struct::RatchetTree
       else
         parent_node_hash_input += [1].pack('C') + node.parent_node.raw
       end
-      parent_node_hash_input += Melos::Vec.from_string(tree_hash(tree, Melos::Tree.left(node_index), suite))
-      parent_node_hash_input += Melos::Vec.from_string(tree_hash(tree, Melos::Tree.right(node_index), suite))
+      parent_node_hash_input += Melos::Vec.string_to_vec(tree_hash(tree, Melos::Tree.left(node_index), suite))
+      parent_node_hash_input += Melos::Vec.string_to_vec(tree_hash(tree, Melos::Tree.right(node_index), suite))
 
       tree_hash_input = [2].pack('C') + parent_node_hash_input
     end

@@ -41,7 +41,7 @@ transcript_hash_vectors.each do |thv|
   )
   ith_next = Melos::Crypto.hash(
     suite,
-    cth + Melos::Vec.from_string(authenticated_content.auth.confirmation_tag)
+    cth + Melos::Vec.string_to_vec(authenticated_content.auth.confirmation_tag)
   )
 
   assert_equal to_hex(cth), thv['confirmed_transcript_hash_after']

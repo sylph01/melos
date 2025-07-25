@@ -101,7 +101,7 @@ vectors.each_with_index do |vec, vec_index|
   encryption_priv_tree = []
   encryption_priv_tree[node_index_of_current_user] = encryption_priv
 
-  interim_transcript_hash = Melos::Crypto.hash(suite, group_context.confirmed_transcript_hash + Melos::Vec.from_string(group_info.confirmation_tag))
+  interim_transcript_hash = Melos::Crypto.hash(suite, group_context.confirmed_transcript_hash + Melos::Vec.string_to_vec(group_info.confirmation_tag))
   resumption_psks = []
   resumption_psks[group_context.epoch] = Melos::KeySchedule.resumption_psk(suite, epoch_secret)
   # advance init secret
@@ -246,7 +246,7 @@ vectors.each_with_index do |vec, vec_index|
 
       # calculate transcript hash and next interim transcript hash
       confirmed_transcript_hash = Melos::Crypto.hash(suite, interim_transcript_hash + authenticated_content.confirmed_transcript_hash_input.raw)
-      interim_transcript_hash = Melos::Crypto.hash(suite, confirmed_transcript_hash + Melos::Vec.from_string(authenticated_content.auth.confirmation_tag))
+      interim_transcript_hash = Melos::Crypto.hash(suite, confirmed_transcript_hash + Melos::Vec.string_to_vec(authenticated_content.auth.confirmation_tag))
 
       # new group context
       group_context = Melos::Struct::GroupContext.create(

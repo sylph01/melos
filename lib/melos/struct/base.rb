@@ -119,13 +119,13 @@ class Melos::Struct::Base
     when :uint64
       [value].pack('Q>')
     when :vec
-      Melos::Vec.from_string(value)
+      Melos::Vec.string_to_vec(value)
     when :vec_of_type
-      Melos::Vec.from_string(value.map { serialize_elem(_1, type_param, nil) }.join)
+      Melos::Vec.string_to_vec(value.map { serialize_elem(_1, type_param, nil) }.join)
     when :class, :framed_content_auth_data
       value.raw
     when :classes
-      Melos::Vec.from_string(value.map(&:raw).join)
+      Melos::Vec.string_to_vec(value.map(&:raw).join)
     when :optional
       if value.nil?
         [0].pack('C')

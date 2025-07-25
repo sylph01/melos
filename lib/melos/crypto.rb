@@ -172,7 +172,7 @@ class Melos::Crypto
   end
 
   def self.ref_hash(suite, label, value)
-    ref_hash_input = Melos::Vec.from_string(label) + Melos::Vec.from_string(value)
+    ref_hash_input = Melos::Vec.string_to_vec(label) + Melos::Vec.string_to_vec(value)
     suite.digest.digest(ref_hash_input)
   end
 
@@ -189,7 +189,7 @@ class Melos::Crypto
   end
 
   def self.expand_with_label(suite, secret, label, context, length)
-    kdf_label = [length].pack('S>') + Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(context)
+    kdf_label = [length].pack('S>') + Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(context)
     suite.kdf.expand(secret, kdf_label, length)
   end
 
@@ -227,26 +227,26 @@ class Melos::Crypto
   end
 
   def self.encrypt_with_label(suite, public_key, label, context, plaintext)
-    encrypt_context = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(context)
+    encrypt_context = Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(context)
     pkey = suite.pkey.deserialize_public_encapsulation_key(public_key)
     seal_base(suite, pkey, encrypt_context, "", plaintext)
   end
 
   def self.decrypt_with_label(suite, private_key, label, context, kem_output, ciphertext)
-    encrypt_context = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(context)
+    encrypt_context = Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(context)
     pkey = suite.pkey.deserialize_private_encapsulation_key(private_key)
     open_base(suite, kem_output, pkey, encrypt_context, "", ciphertext)
   end
 
   def self.sign_with_label(suite, signature_key, label, content)
     skey = suite.pkey.deserialize_private_signature_key(signature_key)
-    sign_content = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(content)
+    sign_content = Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(content)
     skey.sign(suite.pkey.hash_algorithm, sign_content)
   end
 
   def self.verify_with_label(suite, verification_key, label, content, signature_value)
     vkey = suite.pkey.deserialize_public_signature_key(verification_key)
-    sign_content = Melos::Vec.from_string("MLS 1.0 " + label) + Melos::Vec.from_string(content)
+    sign_content = Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(content)
     vkey.verify(suite.pkey.hash_algorithm, signature_value, sign_content)
   end
 
@@ -301,7 +301,7 @@ class Melos::Crypto
   end
 
   def self.parent_hash(suite, encryption_key, ph_of_parent, sibling_hash)
-    parent_hash_input = Melos::Vec.from_string(encryption_key) + Melos::Vec.from_string(ph_of_parent) + Melos::Vec.from_string(sibling_hash)
+    parent_hash_input = Melos::Vec.string_to_vec(encryption_key) + Melos::Vec.string_to_vec(ph_of_parent) + Melos::Vec.string_to_vec(sibling_hash)
     Melos::Crypto.hash(suite, parent_hash_input)
   end
 end
