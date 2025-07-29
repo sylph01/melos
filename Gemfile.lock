@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    melos (0.0.1)
+    melos (0.0.2)
       hpke (~> 0.3.1)
       minitest (~> 5.12, >= 5.12.2)
 
