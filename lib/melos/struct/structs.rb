@@ -379,14 +379,30 @@ class Melos::Struct::KeyPackage < Melos::Struct::Base
     Melos::Crypto.make_keypackage_ref(suite, self.raw)
   end
 
-  # def create(cipher_suite:, init_key:, signature_key:, encryption_key:)
-  #   new_instance = self.allocate
-  #   new_instance.instance_variable_set(:@version, 1)
-  #   new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
-  #   new_instance.instance_variable_set(:@init_key, init_key)
-  #   new_instance.instance_variable_set(:@count, count)
-  #   new_instance
-  # end
+  def self.create(cipher_suite:, init_key:, leaf_node:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, 1)
+    new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
+    new_instance.instance_variable_set(:@init_key, init_key)
+    new_instance.instance_variable_set(:@leaf_node, leaf_node)
+    new_instance.instance_variable_set(:@extensions, leaf_node.extensions)
+    new_instance.instance_variable_set(:@signature, '')
+    new_instance
+  end
+
+  def keypackage_tbs
+    [version].pack('S>') + [cipher_suite].pack('S>') + Melos::Vec.string_to_vec(init_key) + leaf_node.raw + Melos::Vec.string_to_vec(extensions.map(&:raw).join)
+  end
+
+  def sign(signature_private_key)
+    suite = Melos::Crypto::CipherSuite.new(@cipher_suite)
+    @signature = Melos::Crypto.sign_with_label(suite, signature_private_key, "KeyPackageTBS", keypackage_tbs)
+  end
+
+  def verify()
+    suite = Melos::Crypto::CipherSuite.new(@cipher_suite)
+    Melos::Crypto.verify_with_label(suite, leaf_node.signature_key, "KeyPackageTBS", keypackage_tbs, signature)
+  end
 end
 
 class Melos::Struct::KeyPackageTBS < Melos::Struct::Base

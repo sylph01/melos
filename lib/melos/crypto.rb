@@ -5,6 +5,14 @@ require_relative 'vec'
 class Melos::Crypto
   class CipherSuite
     module X25519
+      def self.serialize_public_key(key)
+        key.raw_public_key
+      end
+
+      def self.serialize_private_key(key)
+        key.raw_private_key
+      end
+
       def self.deserialize_public_encapsulation_key(raw)
         OpenSSL::PKey.new_raw_public_key('X25519', raw)
       end
@@ -21,7 +29,11 @@ class Melos::Crypto
         OpenSSL::PKey.new_raw_private_key('ED25519', raw)
       end
 
-      def self.algorithm_name
+      def self.encapsulation_algorithm_name
+        'X25519'
+      end
+      
+      def self.signature_algorithm_name
         'ED25519'
       end
 
@@ -47,7 +59,11 @@ class Melos::Crypto
         OpenSSL::PKey.new_raw_private_key('ED448', raw)
       end
 
-      def self.algorithm_name
+      def self.encapsulation_algorithm_name
+        'X448'
+      end
+      
+      def self.signature_algorithm_name
         'ED448'
       end
 
@@ -58,6 +74,14 @@ class Melos::Crypto
 
     class EC
       # also would like to depend on HPKE gem...
+      def self.serialize_public_key(key)
+        key.public_key.to_bn.to_s(2)
+      end
+
+      def self.serialize_private_key(key)
+        key.private_key.to_s(2)
+      end
+
       def self.deserialize_private_key(secret)
         asn1_seq = OpenSSL::ASN1.Sequence([
           OpenSSL::ASN1.Integer(1),
@@ -124,8 +148,9 @@ class Melos::Crypto
       end
     end
 
-    attr_accessor :level, :digest, :hpke, :kdf, :pkey
+    attr_accessor :level, :digest, :hpke, :kdf, :pkey, :suite_id
     def initialize(suite_id)
+      @suite_id = suite_id
       case suite_id
       when 1 # MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
         @level = 128
@@ -313,13 +338,31 @@ class Melos::Crypto
     Melos::Crypto.hash(suite, parent_hash_input)
   end
 
-  def self.generate_key_pair(suite)
+  def self.generate_encapsulation_key_pair(suite)
     if suite.pkey.equal?(Melos::Crypto::CipherSuite::X25519) || suite.pkey.equal?(Melos::Crypto::CipherSuite::X448)
       # is an Edwards curve
-      OpenSSL::PKey.generate_key(suite.pkey.algorithm_name)
+      OpenSSL::PKey.generate_key(suite.pkey.encapsulation_algorithm_name)
     else
       # is an EC
       OpenSSL::PKey::EC.generate(suite.pkey.curve_name)
     end
+  end
+
+  def self.generate_signature_key_pair(suite)
+    if suite.pkey.equal?(Melos::Crypto::CipherSuite::X25519) || suite.pkey.equal?(Melos::Crypto::CipherSuite::X448)
+      # is an Edwards curve
+      OpenSSL::PKey.generate_key(suite.pkey.signature_algorithm_name)
+    else
+      # is an EC
+      OpenSSL::PKey::EC.generate(suite.pkey.curve_name)
+    end
+  end
+
+  def self.serialize_public_key(suite, pkey)
+    suite.pkey.serialize_public_key(pkey)
+  end
+
+  def self.serialize_private_key(suite, pkey)
+    suite.pkey.serialize_private_key(pkey)
   end
 end
