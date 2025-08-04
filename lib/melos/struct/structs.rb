@@ -119,6 +119,13 @@ class Melos::Struct::Lifetime < Melos::Struct::Base
     [:not_before, :uint64],
     [:not_after, :uint64]
   ]
+
+  def self.create(not_before:, not_after:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@not_before, not_before)
+    new_instance.instance_variable_set(:@not_after, not_after)
+    new_instance
+  end
 end
 
 class Melos::Struct::Extension < Melos::Struct::Base
@@ -372,14 +379,14 @@ class Melos::Struct::KeyPackage < Melos::Struct::Base
     Melos::Crypto.make_keypackage_ref(suite, self.raw)
   end
 
-  def create(cipher_suite:, init_key:, signature_key:, encryption_key:)
-    new_instance = self.allocate
-    new_instance.instance_variable_set(:@version, 1)
-    new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
-    new_instance.instance_variable_set(:@init_key, init_key)
-    new_instance.instance_variable_set(:@count, count)
-    new_instance
-  end
+  # def create(cipher_suite:, init_key:, signature_key:, encryption_key:)
+  #   new_instance = self.allocate
+  #   new_instance.instance_variable_set(:@version, 1)
+  #   new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
+  #   new_instance.instance_variable_set(:@init_key, init_key)
+  #   new_instance.instance_variable_set(:@count, count)
+  #   new_instance
+  # end
 end
 
 class Melos::Struct::KeyPackageTBS < Melos::Struct::Base
