@@ -33,6 +33,13 @@ class Melos::Struct::Credential < Melos::Struct::Base
     [:identity,     :select, ->(ctx){ctx[:credential_type] == Melos::Constants::CredentialType::BASIC}, :vec],
     [:certificates, :select, ->(ctx){ctx[:credential_type] == Melos::Constants::CredentialType::X509},  :classes, Melos::Struct::Certificate]
   ]
+
+  def self.create_basic_credential(identity)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@credential_type, Melos::Constants::CredentialType::BASIC)
+    new_instance.instance_variable_set(:@identity, identity)
+    new_instance
+  end
 end
 
 ## 6.3.2
@@ -363,6 +370,15 @@ class Melos::Struct::KeyPackage < Melos::Struct::Base
 
   def ref(suite)
     Melos::Crypto.make_keypackage_ref(suite, self.raw)
+  end
+
+  def create(cipher_suite:, init_key:, signature_key:, encryption_key:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, 1)
+    new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
+    new_instance.instance_variable_set(:@init_key, init_key)
+    new_instance.instance_variable_set(:@count, count)
+    new_instance
   end
 end
 
