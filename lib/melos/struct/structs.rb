@@ -84,6 +84,26 @@ class Melos::Struct::Capabilities < Melos::Struct::Base
     [:proposals, :vec],     # vec of ProposalTypes (uint16)
     [:credentials, :vec]    # vec of CredentialTypes (uint16)
   ]
+
+  def self.import(capabilities)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@versions, capabilities.versions.pack('S>*'))
+    new_instance.instance_variable_set(:@cipher_suites, capabilities.cipher_suites.pack('S>*'))
+    new_instance.instance_variable_set(:@extensions, capabilities.extensions.pack('S>*'))
+    new_instance.instance_variable_set(:@proposals, capabilities.proposals.pack('S>*'))
+    new_instance.instance_variable_set(:@credentials, capabilities.credentials.pack('S>*'))
+    new_instance
+  end
+
+  def export
+    cap = Melos::Capabilities.new
+    cap.versions = versions.unpack('S>*')
+    cap.cipher_suites = cipher_suites.unpack('S>*')
+    cap.extensions = extensions.unpack('S>*')
+    cap.proposals = proposals.unpack('S>*')
+    cap.credentials = credentials.unpack('S>*')
+    cap
+  end
 end
 
 class Melos::Struct::Lifetime < Melos::Struct::Base
