@@ -21,6 +21,10 @@ class Melos::Crypto
         OpenSSL::PKey.new_raw_private_key('ED25519', raw)
       end
 
+      def self.algorithm_name
+        'ED25519'
+      end
+
       def self.hash_algorithm
         nil
       end
@@ -41,6 +45,10 @@ class Melos::Crypto
 
       def self.deserialize_private_signature_key(raw)
         OpenSSL::PKey.new_raw_private_key('ED448', raw)
+      end
+
+      def self.algorithm_name
+        'ED448'
       end
 
       def self.hash_algorithm
@@ -303,5 +311,15 @@ class Melos::Crypto
   def self.parent_hash(suite, encryption_key, ph_of_parent, sibling_hash)
     parent_hash_input = Melos::Vec.string_to_vec(encryption_key) + Melos::Vec.string_to_vec(ph_of_parent) + Melos::Vec.string_to_vec(sibling_hash)
     Melos::Crypto.hash(suite, parent_hash_input)
+  end
+
+  def self.generate_key_pair(suite)
+    if suite.pkey.equal?(Melos::Crypto::CipherSuite::X25519) || suite.pkey.equal?(Melos::Crypto::CipherSuite::X448)
+      # is an Edwards curve
+      OpenSSL::PKey.generate_key(suite.pkey.algorithm_name)
+    else
+      # is an EC
+      OpenSSL::PKey::EC.generate(suite.pkey.curve_name)
+    end
   end
 end
