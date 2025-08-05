@@ -446,7 +446,7 @@ class Melos::Struct::Update < Melos::Struct::Base
 end
 
 class Melos::Struct::Remove < Melos::Struct::Base
-  attr_reader :removed
+  attr_accessor :removed
   STRUCT = [
     [:removed, :uint32]
   ]

@@ -48,6 +48,7 @@ class Melos::Group
     add_proposal = Melos::Struct::Proposal.allocate
     add_proposal.proposal_type = Melos::Constants::ProposalType::ADD
     add_proposal.add = add
+
     framed_content = Melos::Struct::FramedContent.create(
       group_id: @group_id,
       epoch: @epoch,
@@ -55,6 +56,33 @@ class Melos::Group
       authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
       content_type: Melos::Constants::ContentType::PROPOSAL,
       content: add_proposal
+    )
+    authenticated_content = Melos::Struct::AuthenticatedContent.create(
+      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
+      content: framed_content,
+      auth: nil
+    )
+    authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
+    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
+    public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
+    public_message
+  end
+
+  def create_remove_proposal(target_leaf_index, signature_private_key)
+    # TODO: check if target leaf index exists
+    remove = Melos::Struct::Remove.allocate
+    remove.removed = target_leaf_index
+    remove_proposal = Melos::Struct::Proposal.allocate
+    remove_proposal.proposal_type = Melos::Constants::ProposalType::REMOVE
+    remove_proposal.remove = remove
+
+    framed_content = Melos::Struct::FramedContent.create(
+      group_id: @group_id,
+      epoch: @epoch,
+      sender: Melos::Struct::Sender.create_member(@leaf_index),
+      authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+      content_type: Melos::Constants::ContentType::PROPOSAL,
+      content: remove_proposal
     )
     authenticated_content = Melos::Struct::AuthenticatedContent.create(
       wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
