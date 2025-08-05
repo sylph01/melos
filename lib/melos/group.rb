@@ -57,15 +57,7 @@ class Melos::Group
       content_type: Melos::Constants::ContentType::PROPOSAL,
       content: add_proposal
     )
-    authenticated_content = Melos::Struct::AuthenticatedContent.create(
-      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
-      content: framed_content,
-      auth: nil
-    )
-    authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
-    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
-    public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
-    public_message
+    create_protected_public_message(framed_content, signature_private_key, group_context)
   end
 
   def create_remove_proposal(target_leaf_index, signature_private_key)
@@ -84,15 +76,7 @@ class Melos::Group
       content_type: Melos::Constants::ContentType::PROPOSAL,
       content: remove_proposal
     )
-    authenticated_content = Melos::Struct::AuthenticatedContent.create(
-      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
-      content: framed_content,
-      auth: nil
-    )
-    authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
-    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
-    public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
-    public_message
+    create_protected_public_message(framed_content, signature_private_key, group_context)
   end
 
   # message is the raw message,
@@ -115,5 +99,18 @@ class Melos::Group
       egs.ciphertext
       )
     )
+  end
+
+  private
+  def create_protected_public_message(framed_content, signature_private_key, group_context)
+    authenticated_content = Melos::Struct::AuthenticatedContent.create(
+      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
+      content: framed_content,
+      auth: nil
+    )
+    authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
+    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
+    public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
+    public_message
   end
 end
