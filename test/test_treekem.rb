@@ -126,94 +126,19 @@ vectors.each_with_index do |vector, tree_index|
     ## TODO: move this to RatchetTree
     leaf_node_options = [] # credential, capabilities, extensions; bc-java thing?
     another_new_tree = ratchet_tree.dup
-    original_leaf_node = another_new_tree[sender * 2]
-    leaf_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h) # actually make it with a random value
-    fdp = Melos::Tree.filtered_direct_path(another_new_tree, sender * 2)
-    path_secrets = []
-    current_path_secret = leaf_secret
-    fdp.each do
-      current_path_secret = Melos::Crypto.derive_secret(suite, current_path_secret, "path")
-      path_secrets << current_path_secret
-    end
-    new_commit_secret = Melos::Crypto.derive_secret(suite, current_path_secret, "path")
-    update_path_nodes = []
-    fdp.each_with_index do |fdp_node_index, array_index|
-      path_secret = path_secrets[array_index]
-      node_private_key, node_public_key = Melos::Crypto.derive_key_pair(suite, Melos::Crypto.derive_secret(suite, path_secret, "node"))
 
-      update_path_node = Melos::Struct::UpdatePathNode.create(
-        encryption_key: node_public_key,
-        encrypted_path_secret: []
-      )
-      update_path_nodes << update_path_node
-    end
-    parent_hashes = Melos::Struct::RatchetTree.calculate_parent_hashes(suite, another_new_tree, sender, update_path_nodes)
-    ph0 = parent_hashes.count == 0 ? "" : parent_hashes[0]
-    leaf_private_key, leaf_public_key = Melos::Crypto.derive_key_pair(suite, Melos::Crypto.derive_secret(suite, leaf_secret, "node"))
-    # create new leaf node to replace sender
-    new_leaf_node = Melos::Struct::LeafNode.create(
-      encryption_key: leaf_public_key,
-      signature_key: original_leaf_node.leaf_node.signature_key,
-      credential: original_leaf_node.leaf_node.credential,
-      capabilities: original_leaf_node.leaf_node.capabilities,
-      leaf_node_source: 0x03, # commit
-      lifetime: original_leaf_node.leaf_node.lifetime,
-      parent_hash: ph0,
-      extensions: original_leaf_node.leaf_node.extensions,
-      signature: nil
-    )
-    new_leaf_node.sign(suite, signature_priv_tree[sender * 2], group_id, sender)
-    update_path = Melos::Struct::UpdatePath.create(
-      leaf_node: new_leaf_node,
-      nodes: update_path_nodes
-    )
-    # apply update path to self
-    Melos::Struct::RatchetTree.merge_update_path(suite, another_new_tree, sender, update_path)
+    result = Melos::Struct::RatchetTree.create_and_apply_update_path(another_new_tree, sender, signature_priv_tree[sender * 2], group_id, group_context, suite)
 
-    except = [] # TODO: unused for now, use this to remove leaves from resolution
-    copath_nodes = Melos::Tree.copath_nodes_of_filtered_direct_path(another_new_tree, sender * 2)
-    update_path_nodes = []
-    fdp.each_with_index do |fdp_node_index, array_index|
-      copath_node_index = copath_nodes[array_index]
-      copath_node_resolution = Melos::Tree.resolution(another_new_tree, copath_node_index)
-
-      path_secret = path_secrets[array_index]
-      node_private_key, node_public_key = Melos::Crypto.derive_key_pair(suite, Melos::Crypto.derive_secret(suite, path_secret, "node"))
-
-      ciphertexts = []
-      copath_node_resolution.each do |resolution_node_index|
-        resolution_node_public_key = another_new_tree[resolution_node_index].public_encryption_key
-
-        # check that encryption_priv_tree has the private key that corresponds to this resolution node public key
-        assert_equal true, Melos::Crypto.encapsulation_key_pair_corresponds?(suite, encryption_priv_tree[resolution_node_index], resolution_node_public_key)
-
-        kem_output, ciphertext = Melos::Crypto.encrypt_with_label(suite, resolution_node_public_key, "UpdatePathNode", group_context.raw, path_secret)
-        hpke_ciphertext = Melos::Struct::HPKECipherText.create(
-          kem_output: kem_output,
-          ciphertext: ciphertext
-        )
-        ciphertexts << hpke_ciphertext
-      end
-      update_path_node = Melos::Struct::UpdatePathNode.create(
-        encryption_key: node_public_key,
-        encrypted_path_secret: ciphertexts
-      )
-      update_path_nodes << update_path_node
-    end
-    new_update_path = Melos::Struct::UpdatePath.create(
-      leaf_node: another_new_tree[sender * 2].leaf_node,
-      nodes: update_path_nodes
-    )
     # then verify parent hash of new path
-    assert_equal true, verify_parent_hash_of_path(suite, another_new_tree, sender, new_update_path)
+    assert_equal true, verify_parent_hash_of_path(suite, another_new_tree, sender, result[:update_path])
 
     # then assert that decapsulation succeeds from each leaf on this update path
     (0..(Melos::Tree.n_leaves(another_new_tree) - 1)).each do |leaf_index|
       next if leaf_index == sender
       puts "With new update path, sender #{sender}, receiver #{leaf_index}:"
-      decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, another_new_tree, encryption_priv_tree, new_update_path, sender, leaf_index, group_context)
-      calculated_commit_secret = Melos::Struct::RatchetTree.calculate_commit_secret(suite, another_new_tree, new_update_path, sender, leaf_index, decrypted_path_secret)
-      assert_equal new_commit_secret, calculated_commit_secret
+      decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, another_new_tree, encryption_priv_tree, result[:update_path], sender, leaf_index, group_context)
+      calculated_commit_secret = Melos::Struct::RatchetTree.calculate_commit_secret(suite, another_new_tree, result[:update_path], sender, leaf_index, decrypted_path_secret)
+      assert_equal result[:commit_secret], calculated_commit_secret
       puts "[pass] Verify that commit_secret is the resulting commit secret"
     end
   end
