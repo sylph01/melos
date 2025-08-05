@@ -432,7 +432,7 @@ end
 ## 12.1.1 - 12.1.7
 
 class Melos::Struct::Add < Melos::Struct::Base
-  attr_reader :key_package
+  attr_accessor :key_package
   STRUCT = [
     [:key_package, :class, Melos::Struct::KeyPackage]
   ]
@@ -496,7 +496,7 @@ end
 ## 12.1
 
 class Melos::Struct::Proposal < Melos::Struct::Base
-  attr_reader :proposal_type, :add, :update, :remove, :psk, :reinit, :external_init, :group_context_extensions
+  attr_accessor :proposal_type, :add, :update, :remove, :psk, :reinit, :external_init, :group_context_extensions
   STRUCT = [
     [:proposal_type, :uint16],
     [:add, :select, ->(ctx){ctx[:proposal_type] == Melos::Constants::ProposalType::ADD}, :class, Melos::Struct::Add],
