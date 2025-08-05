@@ -14,6 +14,7 @@ class Melos::Group
     else
       # single node, a leaf node containing an HPKE PK and credential for the creator
       @ratchet_tree = [node]
+      @leaf_index = 0
       @tree_hash = Melos::Struct::RatchetTree.root_tree_hash(@cipher_suite, @ratchet_tree)
       @confirmed_transcript_hash = ''
       @epoch_secret = SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
@@ -28,7 +29,44 @@ class Melos::Group
       @group_initialized = true
     end
   end
+
+  def group_context
+    return nil if !@group_initialized
+    Melos::Struct::GroupContext.create(
+      cipher_suite: @cipher_suite.suite_id,
+      group_id: @group_id,
+      epoch: @epoch,
+      tree_hash: @tree_hash,
+      confirmed_transcript_hash: @confirmed_transcript_hash,
+      extensions: @extensions
+    )
+  end
   
+  def create_add_proposal(key_package, signature_private_key)
+    add = Melos::Struct::Add.allocate
+    add.key_package = key_package
+    add_proposal = Melos::Struct::Proposal.allocate
+    add_proposal.proposal_type = Melos::Constants::ProposalType::ADD
+    add_proposal.add = add
+    framed_content = Melos::Struct::FramedContent.create(
+      group_id: @group_id,
+      epoch: @epoch,
+      sender: Melos::Struct::Sender.create_member(@leaf_index),
+      authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+      content_type: Melos::Constants::ContentType::PROPOSAL,
+      content: add_proposal
+    )
+    authenticated_content = Melos::Struct::AuthenticatedContent.create(
+      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
+      content: framed_content,
+      auth: nil
+    )
+    authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
+    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
+    public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
+    public_message
+  end
+
   # message is the raw message,
   # key_package is a Melos::Struct::MLSMessage that has a KeyPackage type
   def join_with_welcome(message, key_package)
