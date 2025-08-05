@@ -1,7 +1,32 @@
 class Melos::Group
-  def initialize(cipher_suite)
+  attr_reader :group_id, :epoch, :tree_hash, :confirmed_transcript_hash, :confirmation_tag, :interim_transcript_hash
+  def initialize(client, group_id)
     # TODO: check if cipher_suite is defined
-    @cipher_suite = cipher_suite
+    @cipher_suite = client.cipher_suite
+    @group_id = group_id
+    @epoch = 0
+    @group_initialized = false
+  end
+
+  def init_group(node)
+    if @group_initialized
+      # do nothing
+    else
+      # single node, a leaf node containing an HPKE PK and credential for the creator
+      @ratchet_tree = [node]
+      @tree_hash = Melos::Struct::RatchetTree.root_tree_hash(@cipher_suite, @ratchet_tree)
+      @confirmed_transcript_hash = ''
+      @epoch_secret = SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
+      @extensions = []
+      # calculate interim transcript hash
+      # TODO: separate this into a method
+      confirmation_key = Melos::KeySchedule.confirmation_key(@cipher_suite, @epoch_secret)
+      @confirmation_tag = Melos::Crypto.mac(@cipher_suite, confirmation_key, @confirmed_transcript_hash)
+      @interim_transcript_hash = Melos::Crypto.hash(@cipher_suite,
+        @confirmed_transcript_hash + Melos::Vec.string_to_vec(@confirmation_tag)
+      )
+      @group_initialized = true
+    end
   end
   
   # message is the raw message,
