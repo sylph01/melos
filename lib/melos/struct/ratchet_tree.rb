@@ -74,7 +74,8 @@ module Melos::Struct::RatchetTree
     Melos::Crypto.hash(suite, tree_hash_input)
   end
 
-  def self.create_and_apply_update_path(tree, sender_leaf_index, signature_private_key, group_id, group_context, suite, except = [])
+  def self.create_update_path(original_tree, sender_leaf_index, signature_private_key, group_id, group_context, suite, except = [])
+    tree = original_tree.dup
     original_leaf_node = tree[sender_leaf_index * 2]
     leaf_secret = SecureRandom.random_bytes(suite.kdf.n_h)
     fdp = Melos::Tree.filtered_direct_path(tree, sender_leaf_index * 2)

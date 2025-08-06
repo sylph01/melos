@@ -123,11 +123,12 @@ vectors.each_with_index do |vector, tree_index|
     end
 
     ## create a new updatePath
-    ## TODO: move this to RatchetTree
     leaf_node_options = [] # credential, capabilities, extensions; bc-java thing?
     another_new_tree = ratchet_tree.dup
-
-    result = Melos::Struct::RatchetTree.create_and_apply_update_path(another_new_tree, sender, signature_priv_tree[sender * 2], group_id, group_context, suite)
+    result = Melos::Struct::RatchetTree.create_update_path(another_new_tree, sender, signature_priv_tree[sender * 2], group_id, group_context, suite)
+    
+    # then apply updatePath
+    Melos::Struct::RatchetTree.merge_update_path(suite, another_new_tree, sender, result[:update_path])
 
     # then verify parent hash of new path
     assert_equal true, verify_parent_hash_of_path(suite, another_new_tree, sender, result[:update_path])
