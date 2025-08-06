@@ -79,6 +79,25 @@ class Melos::Group
     create_protected_public_message(framed_content, signature_private_key, group_context)
   end
 
+  def create_empty_commit(signature_private_key)
+    # empty commit = update path only
+    result = Melos::Struct::RatchetTree.create_update_path(@ratchet_tree, @leaf_index, signature_private_key, @group_id, group_context, @cipher_suite)
+    commit = Melos::Struct::Commit.create(
+      proposals: [],
+      path: result[:update_path]
+    )
+
+    framed_content = Melos::Struct::FramedContent.create(
+      group_id: @group_id,
+      epoch: @epoch,
+      sender: Melos::Struct::Sender.create_member(@leaf_index),
+      authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
+      content_type: Melos::Constants::ContentType::COMMIT,
+      content: commit
+    )
+    create_protected_public_message(framed_content, signature_private_key, group_context)
+  end
+
   # message is the raw message,
   # key_package is a Melos::Struct::MLSMessage that has a KeyPackage type
   def join_with_welcome(message, key_package)
@@ -109,6 +128,10 @@ class Melos::Group
       auth: nil
     )
     authenticated_content.sign(@cipher_suite, signature_private_key, group_context)
+    if framed_content.content_type == Melos::Constants::ContentType::COMMIT
+      confirmation_tag = Melos::Crypto.derive_secret(@cipher_suite, Melos::Crypto::Util.zero_vector(@cipher_suite.kdf.n_h), "confirmation_tag")
+      authenticated_content.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+    end
     membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
     public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
     public_message

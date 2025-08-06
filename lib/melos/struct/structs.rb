@@ -522,6 +522,14 @@ class Melos::Struct::ProposalOrRef < Melos::Struct::Base
     [:proposal, :select,  ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::PROPOSAL}, :class, Melos::Struct::Proposal],
     [:reference, :select, ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::REFERENCE}, :vec] # ProposalRef is a HashReference, which is a :vec
   ]
+
+  def self.create(type:, proposal:, reference:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@type, type)
+    new_instance.instance_variable_set(:@proposal, proposal)
+    new_instance.instance_variable_set(:@reference, reference)
+    new_instance
+  end
 end
 
 class Melos::Struct::Commit < Melos::Struct::Base
@@ -530,6 +538,13 @@ class Melos::Struct::Commit < Melos::Struct::Base
     [:proposals, :classes, Melos::Struct::ProposalOrRef],
     [:path, :optional, Melos::Struct::UpdatePath]
   ]
+
+  def self.create(proposals:, path:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposals, proposals)
+    new_instance.instance_variable_set(:@path, path)
+    new_instance
+  end
 end
 
 ## 12.4.3

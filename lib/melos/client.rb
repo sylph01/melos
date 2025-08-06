@@ -1,5 +1,6 @@
 class Melos::Client
-  attr_reader :cipher_suite, :signature_key_pair, :encryption_key_pair
+  attr_reader :cipher_suite
+  attr_accessor :signature_key_pair, :encryption_key_pair
 
   def initialize(cipher_suite_id)
     @cipher_suite = Melos::Crypto::CipherSuite.new(cipher_suite_id)
