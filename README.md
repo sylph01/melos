@@ -39,6 +39,24 @@ message = Melos::MessageFactory.create_proposal_message(
 )
 ```
 
+### Testing
+
+The message creation functionality includes comprehensive tests:
+
+```bash
+# Run all message creation tests
+ruby -I lib test/run_message_creation_tests.rb
+
+# Run individual test suites
+ruby -I lib test/test_proposal_factory.rb     # ProposalFactory tests
+ruby -I lib test/test_message_creation.rb     # Creation method tests
+ruby -I lib test/test_group_state.rb          # GroupState tests
+ruby -I lib test/test_message_factory.rb      # MessageFactory tests
+
+# Run original tests to ensure no regressions
+ruby -I lib test/test_messages.rb
+```
+
 ### Still lacking (not a complete list):
 
 - Applying ReInit/ExternalInit proposals

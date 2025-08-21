@@ -45,7 +45,7 @@ module Melos
       )
 
       # Sign the authenticated content
-      authenticated_content.sign!(group_state.signature_private_key, group_state.group_context)
+      authenticated_content.sign!(group_state.cipher_suite, group_state.signature_private_key, group_state.group_context)
 
       # Create PrivateMessageContent
       private_content = Melos::Struct::PrivateMessageContent.create_application(
@@ -102,7 +102,7 @@ module Melos
       )
 
       # Sign the authenticated content
-      authenticated_content.sign!(group_state.signature_private_key, group_state.group_context)
+      authenticated_content.sign!(group_state.cipher_suite, group_state.signature_private_key, group_state.group_context)
 
       # Protect as PublicMessage
       public_message = Melos::Struct::PublicMessage.protect(
@@ -159,7 +159,7 @@ module Melos
       )
 
       # Sign the authenticated content
-      authenticated_content.sign!(group_state.signature_private_key, group_state.group_context)
+      authenticated_content.sign!(group_state.cipher_suite, group_state.signature_private_key, group_state.group_context)
 
       # Protect as PublicMessage
       public_message = Melos::Struct::PublicMessage.protect(
