@@ -377,6 +377,12 @@ class Melos::Struct::Add < Melos::Struct::Base
   STRUCT = [
     [:key_package, :class, Melos::Struct::KeyPackage]
   ]
+
+  def self.create(key_package:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@key_package, key_package)
+    new_instance
+  end
 end
 
 class Melos::Struct::Update < Melos::Struct::Base
@@ -384,6 +390,12 @@ class Melos::Struct::Update < Melos::Struct::Base
   STRUCT = [
     [:leaf_node, :class, Melos::Struct::LeafNode]
   ]
+
+  def self.create(leaf_node:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@leaf_node, leaf_node)
+    new_instance
+  end
 end
 
 class Melos::Struct::Remove < Melos::Struct::Base
@@ -391,6 +403,12 @@ class Melos::Struct::Remove < Melos::Struct::Base
   STRUCT = [
     [:removed, :uint32]
   ]
+
+  def self.create(removed:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@removed, removed)
+    new_instance
+  end
 end
 
 class Melos::Struct::PreSharedKey < Melos::Struct::Base
@@ -398,6 +416,12 @@ class Melos::Struct::PreSharedKey < Melos::Struct::Base
   STRUCT = [
     [:psk, :class, Melos::Struct::PreSharedKeyID]
   ]
+
+  def self.create(psk:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@psk, psk)
+    new_instance
+  end
 end
 
 class Melos::Struct::ReInit < Melos::Struct::Base
@@ -408,6 +432,15 @@ class Melos::Struct::ReInit < Melos::Struct::Base
     [:cipher_suite, :uint16],
     [:extensions, :classes, Melos::Struct::Extension]
   ]
+
+  def self.create(group_id:, version:, cipher_suite:, extensions:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@group_id, group_id)
+    new_instance.instance_variable_set(:@version, version)
+    new_instance.instance_variable_set(:@cipher_suite, cipher_suite)
+    new_instance.instance_variable_set(:@extensions, extensions)
+    new_instance
+  end
 end
 
 class Melos::Struct::ExternalInit < Melos::Struct::Base
@@ -415,6 +448,12 @@ class Melos::Struct::ExternalInit < Melos::Struct::Base
   STRUCT = [
     [:kem_output, :vec]
   ]
+
+  def self.create(kem_output:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@kem_output, kem_output)
+    new_instance
+  end
 end
 
 class Melos::Struct::GroupContextExtensions < Melos::Struct::Base
@@ -422,6 +461,12 @@ class Melos::Struct::GroupContextExtensions < Melos::Struct::Base
   STRUCT = [
     [:extensions, :classes, Melos::Struct::Extension]
   ]
+
+  def self.create(extensions:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@extensions, extensions)
+    new_instance
+  end
 end
 
 ## 12.1.8.1
@@ -452,6 +497,55 @@ class Melos::Struct::Proposal < Melos::Struct::Base
   def proposal_content
     @add || @update || @remove || @psk || @reinit || @external_init || @group_context_extensions
   end
+
+  def self.create_add(add:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::ADD)
+    new_instance.instance_variable_set(:@add, add)
+    new_instance
+  end
+
+  def self.create_update(update:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::UPDATE)
+    new_instance.instance_variable_set(:@update, update)
+    new_instance
+  end
+
+  def self.create_remove(remove:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::REMOVE)
+    new_instance.instance_variable_set(:@remove, remove)
+    new_instance
+  end
+
+  def self.create_psk(psk:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::PSK)
+    new_instance.instance_variable_set(:@psk, psk)
+    new_instance
+  end
+
+  def self.create_reinit(reinit:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::REINIT)
+    new_instance.instance_variable_set(:@reinit, reinit)
+    new_instance
+  end
+
+  def self.create_external_init(external_init:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::EXTERNAL_INIT)
+    new_instance.instance_variable_set(:@external_init, external_init)
+    new_instance
+  end
+
+  def self.create_group_context_extensions(group_context_extensions:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal_type, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS)
+    new_instance.instance_variable_set(:@group_context_extensions, group_context_extensions)
+    new_instance
+  end
 end
 
 ## 12.4
@@ -463,6 +557,17 @@ class Melos::Struct::ProposalOrRef < Melos::Struct::Base
     [:proposal, :select,  ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::PROPOSAL}, :class, Melos::Struct::Proposal],
     [:reference, :select, ->(ctx){ctx[:type] == Melos::Constants::ProposalOrRefType::REFERENCE}, :vec] # ProposalRef is a HashReference, which is a :vec
   ]
+
+  def self.create(type:, proposal: nil, reference: nil)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@type, type)
+    if type == Melos::Constants::ProposalOrRefType::PROPOSAL
+      new_instance.instance_variable_set(:@proposal, proposal)
+    elsif type == Melos::Constants::ProposalOrRefType::REFERENCE
+      new_instance.instance_variable_set(:@reference, reference)
+    end
+    new_instance
+  end
 end
 
 class Melos::Struct::Commit < Melos::Struct::Base
@@ -471,6 +576,13 @@ class Melos::Struct::Commit < Melos::Struct::Base
     [:proposals, :classes, Melos::Struct::ProposalOrRef],
     [:path, :optional, Melos::Struct::UpdatePath]
   ]
+
+  def self.create(proposals:, path: nil)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposals, proposals)
+    new_instance.instance_variable_set(:@path, path)
+    new_instance
+  end
 end
 
 ## 12.4.3
@@ -660,7 +772,7 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
     end
   end
 
-  def self.create(signature:, content_type:, confirmation_tag:)
+  def self.create(signature:, content_type:, confirmation_tag: nil)
     instance = self.allocate
     instance.instance_variable_set(:@signature, signature)
     instance.instance_variable_set(:@content_type, content_type)
@@ -668,6 +780,14 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
       instance.instance_variable_set(:@confirmation_tag, confirmation_tag)
     end
     instance
+  end
+
+  def self.create_signature_auth(signature:, content_type:, confirmation_tag: nil)
+    create(
+      signature: signature,
+      content_type: content_type,
+      confirmation_tag: confirmation_tag
+    )
   end
 end
 
@@ -760,6 +880,11 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
       content_type: content.content_type,
       confirmation_tag: nil
     )
+  end
+
+  # Alias for sign method for consistency with MessageFactory
+  def sign!(suite, signature_private_key, group_context)
+    sign(suite, signature_private_key, group_context)
   end
 end
 
@@ -972,6 +1097,30 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
   def content
     @application_data || @proposal || @commit
   end
+
+  def self.create_application(application_data:, auth:, padding_size: 0)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@application_data, application_data)
+    new_instance.instance_variable_set(:@auth, auth)
+    new_instance.instance_variable_set(:@padding, "\x00" * padding_size)
+    new_instance
+  end
+
+  def self.create_proposal(proposal:, auth:, padding_size: 0)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@proposal, proposal)
+    new_instance.instance_variable_set(:@auth, auth)
+    new_instance.instance_variable_set(:@padding, "\x00" * padding_size)
+    new_instance
+  end
+
+  def self.create_commit(commit:, auth:, padding_size: 0)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@commit, commit)
+    new_instance.instance_variable_set(:@auth, auth)
+    new_instance.instance_variable_set(:@padding, "\x00" * padding_size)
+    new_instance
+  end
 end
 
 ## 8.2
@@ -1016,5 +1165,45 @@ class Melos::Struct::MLSMessage < Melos::Struct::Base
     if wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
       public_message.verify(suite, signer_public_key, version, wire_format, group_context)
     end
+  end
+
+  def self.create_public_message(public_message:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    new_instance.instance_variable_set(:@wire_format, Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE)
+    new_instance.instance_variable_set(:@public_message, public_message)
+    new_instance
+  end
+
+  def self.create_private_message(private_message:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    new_instance.instance_variable_set(:@wire_format, Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE)
+    new_instance.instance_variable_set(:@private_message, private_message)
+    new_instance
+  end
+
+  def self.create_welcome(welcome:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    new_instance.instance_variable_set(:@wire_format, Melos::Constants::WireFormat::MLS_WELCOME)
+    new_instance.instance_variable_set(:@welcome, welcome)
+    new_instance
+  end
+
+  def self.create_group_info(group_info:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    new_instance.instance_variable_set(:@wire_format, Melos::Constants::WireFormat::MLS_GROUP_INFO)
+    new_instance.instance_variable_set(:@group_info, group_info)
+    new_instance
+  end
+
+  def self.create_key_package(key_package:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    new_instance.instance_variable_set(:@wire_format, Melos::Constants::WireFormat::MLS_KEY_PACKAGE)
+    new_instance.instance_variable_set(:@key_package, key_package)
+    new_instance
   end
 end
