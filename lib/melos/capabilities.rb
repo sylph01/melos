@@ -1,8 +1,11 @@
 class Melos::Capabilities
   attr_accessor :versions, :cipher_suites, :extensions, :proposals, :credentials
 
-  def initialize
+  # credentials: the credential types this client can validate in other members' leaves (13.3); a client
+  # that accepts X.509 credentials (Melos::Credential::X509) lists 2 as well as 1
+  def initialize(credentials: [Melos::Constants::CredentialType::BASIC])
     set_default
+    @credentials = credentials
   end
 
   def set_default

@@ -12,14 +12,25 @@ require_relative 'struct/structs'
 class Melos::Client
   attr_reader :cipher_suite, :credential, :external_psks, :key_packages, :groups
 
-  def initialize(cipher_suite_id, identity: '')
+  #   identity: for a basic credential
+  #   credential: any other credential (Melos::Credential::X509.create_credential, say); its key is then
+  #               signature_private_key, the private key of the certified public key, as MLS serializes it
+  #   credential_types: the credential types this client's leaves claim to support (13.3), by default basic
+  #                     and its own; members of a group must all support every type in use
+  def initialize(cipher_suite_id, identity: '', credential: nil, signature_private_key: nil, credential_types: nil)
     @cipher_suite = Melos::Crypto::CipherSuite.new(cipher_suite_id)
-    @signature_key_pair = Melos::Crypto.generate_signature_key_pair(@cipher_suite)
-    @credential = Melos::Struct::Credential.create_basic_credential(identity)
+    @signature_key_pair = signature_private_key ? @cipher_suite.pkey.deserialize_private_signature_key(signature_private_key) : Melos::Crypto.generate_signature_key_pair(@cipher_suite)
+    @credential = credential || Melos::Struct::Credential.create_basic_credential(identity)
+    @credential_types = credential_types || ([Melos::Constants::CredentialType::BASIC] | [@credential.credential_type])
     @external_psks = {} # psk_id -> psk; shared by reference with the groups this client is in
     @key_packages = {}  # KeyPackageRef -> Melos::KeyPackageBundle, until used to join a group
     @groups = {}        # group_id -> Melos::Group this client created or joined
     @resumption_psks = {} # [group_id, epoch] -> resumption_psk, of groups no longer in @groups (8.6)
+  end
+
+  # 7.2: the Capabilities this client's leaves carry unless told otherwise
+  def default_capabilities
+    Melos::Struct::Capabilities.import(Melos::Capabilities.new(credentials: @credential_types))
   end
 
   # 8.6: the resumption PSK of a group this client is or was in, or nil
@@ -44,7 +55,7 @@ class Melos::Client
   def create_key_package(capabilities: nil, lifetime: nil, extensions: [])
     bundle = Melos::KeyPackageBundle.generate(
       @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key,
-      credential: @credential, capabilities: capabilities, lifetime: lifetime, extensions: extensions
+      credential: @credential, capabilities: capabilities || default_capabilities, lifetime: lifetime, extensions: extensions
     )
     @key_packages[bundle.ref] = bundle
     bundle
@@ -67,7 +78,8 @@ class Melos::Client
   # options are passed to Melos::Group (credential_validator:, max_leaf_node_lifetime:, ...)
   def create_group(group_id, extensions: [], **options)
     bundle = Melos::KeyPackageBundle.generate(
-      @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
+      @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential,
+      capabilities: default_capabilities
     )
     ensure_group_id_free!(group_id)
     store_group(Melos::Group.create(
@@ -115,7 +127,8 @@ class Melos::Client
   # Returns [group, commit MLSMessage].
   def join_by_external_commit(group_info, ratchet_tree: nil, remove: nil, psk_ids: [], authenticated_data: '', **options)
     bundle = Melos::KeyPackageBundle.generate(
-      @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
+      @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential,
+      capabilities: default_capabilities
     )
     group, result = Melos::Group.join_by_external_commit(
       @cipher_suite, group_info, signature_private_key: signature_private_key, leaf_node: bundle.key_package.leaf_node,
@@ -163,7 +176,7 @@ class Melos::Client
       format: STATE_FORMAT,
       cipher_suite: @cipher_suite.suite_id,
       signature_private_key: signature_private_key,
-      credential: @credential.raw,
+      credential: @credential.raw, credential_types: @credential_types,
       external_psks: @external_psks.to_a,
       key_packages: @key_packages.map { |ref, bundle| [ref, bundle.to_h] },
       groups: @groups.map { |group_id, group| [group_id, group.to_h(include_external_psks: false)] },
@@ -185,6 +198,7 @@ class Melos::Client
     @cipher_suite = Melos::Crypto::CipherSuite.new(hash[:cipher_suite])
     @signature_key_pair = @cipher_suite.pkey.deserialize_private_signature_key(hash[:signature_private_key])
     @credential = Melos::Struct::Credential.new(hash[:credential])
+    @credential_types = hash[:credential_types] || [Melos::Constants::CredentialType::BASIC]
     @external_psks = hash[:external_psks].to_h
     @key_packages = hash[:key_packages].to_h { |ref, bundle| [ref, Melos::KeyPackageBundle.from_h(@cipher_suite, bundle)] }
     @groups = hash[:groups].to_h do |group_id, group|

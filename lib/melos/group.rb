@@ -149,12 +149,14 @@ class Melos::Group
     epoch_secrets = Melos::EpochSecrets.from_init_secret(suite, SecureRandom.random_bytes(suite.kdf.n_h), secret_tree_options: secret_tree_options)
       .next(Melos::Crypto::Util.zero_vector(suite.kdf.n_h), Melos::PSK.psk_secret(suite, []), group_context, n_leaves: 1)
     confirmation_tag = Melos::Crypto.mac(suite, epoch_secrets.confirmation_key, '')
-    new(
+    group = new(
       suite: suite, group_id: group_id, epoch: 0, leaf_index: 0, signature_private_key: signature_private_key,
       ratchet_tree: ratchet_tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: '', interim_transcript_hash: interim_transcript_hash(suite, '', confirmation_tag),
       epoch_secrets: epoch_secrets.discard_consumed!, external_psks: external_psks, confirmation_tag: confirmation_tag, **options
     )
+    group.send(:validate_external_senders!, extensions)
+    group
   end
 
   # 12.4.3.1: join a group from a Welcome.
@@ -308,6 +310,7 @@ class Melos::Group
     )
     group.instance_variable_set(:@external_joiner, true)
     group.send(:validate_tree!, tree, group_context.extensions)
+    group.send(:validate_external_senders!, group_context.extensions)
     [group, group.send(:create_external_commit, kem_output, leaf_node, remove: remove, psk_ids: psk_ids, authenticated_data: authenticated_data)]
   end
 
@@ -958,7 +961,7 @@ class Melos::Group
       Joiner.new(leaf_index, key_package)
     end
     psk_ids = of_type.(Melos::Constants::ProposalType::PSK).map { |proposal, _sender| proposal.psk.psk }
-    external_senders(extensions) # 12.1.8.1: a malformed external_senders extension is rejected here
+    validate_external_senders!(extensions) if extensions != @extensions # 5.3.1, 12.1.8.1: when the extension is added or changed
     # 12.2, 12.1.7: the members that remain must all be compatible with the new extensions and with each other
     validate_members!(tree, extensions)
     [extensions, joiners, psk_ids]

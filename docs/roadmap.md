@@ -172,7 +172,7 @@ their types. `Melos::Persistence` gives JSON with hex strings (`dump_client`, `l
 `external_proposal_validator:`) are passed again on load. A `StagedCommit` is not part of the state:
 merge or discard it before saving. Tests in `test/test_persistence.rb`.
 
-## 9. X.509 credentials (M, application-dependent) — RFC 5.3, 5.3.1, 13.3
+## 9. X.509 credentials (M, application-dependent) — RFC 5.3, 5.3.1, 13.3 — done
 
 **RFC.** The AS validates credentials; for X.509 the end-entity certificate's public key MUST equal the
 leaf's `signature_key`, and the chain is verified by the application's policy.
@@ -187,6 +187,16 @@ credential type 2 only when the validator is installed.
 
 **Test.** A self-signed chain generated in the test; a certificate whose key differs from the leaf's
 is rejected.
+
+**Done as.** `Melos::Credential::X509.new(store:, time:, identity_check:, accept_basic:)` is a callable
+for `credential_validator:`: end-entity key equals the holder's `signature_key`, the chain verifies with
+`OpenSSL::X509::StoreContext` (validity dates included, at `time:` or now), the application's
+`identity_check:` for reference identifiers and successor policy (5.3.1); `#last_error` says why a
+check failed. `.create_credential(certificates)` builds the credential. `Client.new` takes
+`credential:`, `signature_private_key:` and `credential_types:` (what its leaves' capabilities list;
+basic plus its own by default, so a basic client must opt in to X.509 to join a group using it,
+13.3). Also, 5.3.1: the credentials of an `external_senders` extension now go through the validator
+when the extension is set, on creation, join and external join. Tests in `test/test_x509.rb`.
 
 ## 10. Resumption PSKs, ReInit and subgroup branching (M/L) — RFC 8.4, 11.2, 11.3, 12.1.5, 12.4.3.1 — done
 
@@ -276,5 +286,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11~~ → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9~~ → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

@@ -248,9 +248,19 @@ class Melos::Group
     end
   end
 
+  # 5.3.1, 12.1.8.1: an external_senders extension parses, and each sender's credential is validated by the
+  # application's Authentication Service (the credential_validator gets the ExternalSender as the holder)
+  def validate_external_senders!(extensions)
+    external_senders(extensions).each do |external_sender|
+      next if @credential_validator.call(external_sender.credential, external_sender)
+      raise Melos::ProtocolError.new('external sender credential rejected')
+    end
+  end
+
   # 12.4.3.1: what a new member checks about the state it was welcomed into, once it is assembled
   def validate_joined_state!
     validate_tree!(@ratchet_tree, @extensions)
+    validate_external_senders!(@extensions)
     # the private keys derived from the Welcome's path secret must be the ones for the public keys in the tree
     raise Melos::ProtocolError.new('derived private keys do not match the ratchet tree') unless @private_tree.consistent?(@ratchet_tree)
   end

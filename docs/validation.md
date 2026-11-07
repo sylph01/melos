@@ -82,7 +82,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 
 | # | Requirement | RFC | Status | Code |
 |---|---|---|---|---|
-| 5.1 | Credential valid per 5.3.1 (Authentication Service) | 7.3, 5.3.1 | done (hook) | `credential_validator:` option; default accepts basic credentials only |
+| 5.1 | Credential valid per 5.3.1 (Authentication Service), for leaves and external senders | 7.3, 5.3.1, 12.1.8.1 | done (hook) | `credential_validator:` option; default accepts basic credentials only; `Melos::Credential::X509` checks X.509 chains and the key match of 5.3; `#validate_external_senders!` |
 | 5.2 | Signature valid with signature_key (with group_id and leaf_index for update/commit sources) | 7.3 | done | `#validate_leaf_node!` |
 | 5.3 | If GroupContext has required_capabilities, its extensions, proposals and credential types MUST be in the leaf's capabilities | 7.3, 11.1, 13.4 | done | `#validate_capabilities!` |
 | 5.4 | Credential type supported by all members; leaf supports every credential type in use | 7.3, 13.3 | done | `#validate_leaf_node!`, `#validate_members!` |
