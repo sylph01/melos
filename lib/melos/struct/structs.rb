@@ -656,8 +656,9 @@ class Melos::Struct::Node < Melos::Struct::Base
     [:parent_node, :select, ->(ctx){ctx[:node_type] == Melos::Constants::NodeType::PARENT}, :class, Melos::Struct::ParentNode] # parent
   ]
 
+  # the parent_hash this node carries: nil for a leaf whose source is key_package or update (7.2)
   def parent_hash_in_node
-    @leaf_node&.parent_hash || @parent_node.parent_hash
+    @parent_node ? @parent_node.parent_hash : @leaf_node.parent_hash
   end
 
   def public_encryption_key

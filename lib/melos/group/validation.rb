@@ -187,6 +187,43 @@ class Melos::Group
     end
   end
 
+  # 12.4.3.1: what a new member checks about the state it was welcomed into, once it is assembled
+  def validate_joined_state!
+    validate_tree!(@ratchet_tree, @extensions)
+    # the private keys derived from the Welcome's path secret must be the ones for the public keys in the tree
+    raise ArgumentError.new('derived private keys do not match the ratchet tree') unless @private_tree.consistent?(@ratchet_tree)
+  end
+
+  # 12.4.3.1, 7.9.2, 7.3: the integrity of a ratchet tree received from someone else.
+  # Also what makes 13.4 hold for us: validate_leaf_node! on our own leaf checks that we support every GroupContext extension.
+  def validate_tree!(tree, extensions)
+    raise ArgumentError.new('ratchet tree has a parent node that is not parent-hash valid') unless tree.parent_hash_valid?
+    tree.each_leaf_node do |leaf_node, leaf_index|
+      validate_leaf_node!(leaf_node, context: :tree, leaf_index: leaf_index, tree: tree, extensions: extensions)
+    end
+
+    encryption_keys = []
+    tree.each_leaf_node { |leaf_node, _index| encryption_keys << leaf_node.encryption_key }
+    tree.nodes.each_with_index do |node, node_index|
+      next if node.nil? || node.parent_node.nil?
+      parent_node = node.parent_node
+      encryption_keys << parent_node.encryption_key
+      parent_node.unmerged_leaves.each do |leaf_index|
+        raise ArgumentError.new("unmerged leaf #{leaf_index} is blank") if tree.leaf_node_at(leaf_index).nil?
+        direct_path = Melos::Tree.direct_path(leaf_index * 2, tree.n_leaves)
+        raise ArgumentError.new("unmerged leaf #{leaf_index} is not under node #{node_index}") unless direct_path.include?(node_index)
+        # every non-blank node between the leaf and this node lists the leaf as unmerged too
+        direct_path.take_while { _1 != node_index }.each do |between|
+          next if tree[between].nil?
+          next if tree[between].parent_node.unmerged_leaves.include?(leaf_index)
+          raise ArgumentError.new("unmerged leaf #{leaf_index} of node #{node_index} is merged at node #{between} below it")
+        end
+      end
+    end
+    # 12.4.3.1, 16.7: no encryption key appears in two nodes
+    raise ArgumentError.new('an encryption key appears in more than one node of the ratchet tree') unless encryption_keys.uniq.size == encryption_keys.size
+  end
+
   # 11.1: the required_capabilities extension of a GroupContext, decoded, or nil.
   # Returns an object with extension_types, proposal_types and credential_types as integer arrays.
   def required_capabilities(extensions)

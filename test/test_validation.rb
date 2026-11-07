@@ -215,6 +215,28 @@ assert_equal alice_group.epoch_authenticator, carol_group.epoch_authenticator
 assert_equal 1, alice_group.extensions.size
 puts "[pass] required_capabilities nobody supports is rejected; one everybody supports takes effect"
 
+## 12.4.3.1 tree integrity, checked when joining; here against copies of Alice's tree (Alice, Bob, Carol, a blank leaf)
+check_tree = ->(tree) { alice_group.send(:validate_tree!, tree, alice_group.extensions) }
+check_tree.(alice_group.ratchet_tree) # the real tree passes
+root = alice_group.ratchet_tree.root
+real_parent = alice_group.ratchet_tree[root].parent_node
+refute_nil real_parent, 'the test expects a non-blank root after the commits above'
+
+tampered = alice_group.ratchet_tree.dup
+tampered.nodes[root] = Melos::Struct::Node.new_parent_node(Melos::Struct::ParentNode.create(encryption_key: real_parent.encryption_key, parent_hash: "x" * 32, unmerged_leaves: real_parent.unmerged_leaves))
+assert_raises(ArgumentError) { check_tree.(tampered) }
+puts "[pass] a tree with a parent node that is not parent-hash valid is rejected"
+
+duplicate = alice_group.ratchet_tree.dup
+duplicate.nodes[2] = duplicate.nodes[0] # Bob's leaf replaced by a copy of Alice's
+assert_raises(ArgumentError) { check_tree.(duplicate) }
+puts "[pass] a tree where two leaves share their keys is rejected"
+
+blank_unmerged = alice_group.ratchet_tree.dup
+blank_unmerged.nodes[root] = Melos::Struct::Node.new_parent_node(Melos::Struct::ParentNode.create(encryption_key: real_parent.encryption_key, parent_hash: real_parent.parent_hash, unmerged_leaves: [3]))
+assert_raises(ArgumentError) { check_tree.(blank_unmerged) }
+puts "[pass] a tree whose parent lists a blank leaf as unmerged is rejected"
+
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
 bob_group.process_message(wire(result.commit))

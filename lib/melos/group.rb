@@ -152,15 +152,14 @@ class Melos::Group
     raise ArgumentError.new('no ratchet tree available') if ratchet_tree_data.nil?
     tree = Melos::RatchetTree.parse(suite, ratchet_tree_data)
     raise ArgumentError.new('tree hash does not match GroupContext') unless tree.root_tree_hash == group_context.tree_hash
-    # TODO: verify parent hashes and leaf node signatures of the tree (12.4.3.1)
 
     # Verify the GroupInfo signature with the signer's leaf
     signer_leaf_node = tree.leaf_node_at(group_info.signer)
     raise ArgumentError.new('GroupInfo signer is not in the tree') if signer_leaf_node.nil?
     raise ArgumentError.new('GroupInfo signature does not verify') unless group_info.verify(suite, signer_leaf_node.signature_key)
 
-    # Find our own leaf by the encryption key of our KeyPackage
-    leaf_index = tree.find_leaf_index { _1.encryption_key == key_package.leaf_node.encryption_key }
+    # Find our own leaf: the one identical to our KeyPackage's LeafNode
+    leaf_index = tree.find_leaf_index { _1.raw == key_package.leaf_node.raw }
     raise ArgumentError.new('our KeyPackage is not in the tree') if leaf_index.nil?
     private_tree = Melos::PrivateTree.new
     private_tree[leaf_index * 2] = encryption_private_key
@@ -175,13 +174,15 @@ class Melos::Group
     expected_tag = Melos::Crypto.mac(suite, epoch_secrets.confirmation_key, group_context.confirmed_transcript_hash)
     raise ArgumentError.new('GroupInfo confirmation tag does not verify') unless group_info.confirmation_tag == expected_tag
 
-    new(
+    group = new(
       suite: suite, group_id: group_context.group_id, epoch: group_context.epoch, leaf_index: leaf_index,
       signature_private_key: signature_private_key, ratchet_tree: tree, private_tree: private_tree,
       extensions: group_context.extensions, confirmed_transcript_hash: group_context.confirmed_transcript_hash,
       interim_transcript_hash: interim_transcript_hash(suite, group_context.confirmed_transcript_hash, group_info.confirmation_tag),
       epoch_secrets: epoch_secrets, external_psks: external_psks, **options
     )
+    group.send(:validate_joined_state!)
+    group
   end
 
   # 8.2: interim_transcript_hash = Hash(confirmed_transcript_hash || InterimTranscriptHashInput)
