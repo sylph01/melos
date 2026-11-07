@@ -704,35 +704,16 @@ class Melos::Struct::Sender < Melos::Struct::Base
   end
 end
 
+# The select in FramedContentAuthData depends on FramedContent.content_type, a field of
+# the enclosing struct, so the parent passes it in as external context:
+#   [:auth, :class, Melos::Struct::FramedContentAuthData, ->(ctx){ {content_type: ctx[:content].content_type} }]
 class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
   attr_reader :signature, :confirmation_tag, :content_type
 
   STRUCT = [
-    [:signature, :vec]
+    [:signature, :vec],
+    [:confirmation_tag, :select, ->(ctx){ctx[:content_type] == Melos::Constants::ContentType::COMMIT}, :vec] # MAC is opaque <V>
   ]
-
-  # initialize from stream
-  def self.new_with_content_type(stream, content_type)
-    instance = self.allocate
-    context = instance.send(:deserialize, stream)
-    # custom part based on instance variable
-    if content_type == Melos::Constants::ContentType::COMMIT # commit
-      # read MAC(opaque <V>) confirmation_tag
-      value = Melos::Vec.parse_stream(stream)
-      context << [:confirmation_tag, value]
-    end
-    context << [:content_type, content_type]
-    instance.send(:set_instance_vars, context)
-    instance
-  end
-
-  def raw
-    if @content_type == Melos::Constants::ContentType::COMMIT
-      Melos::Vec.string_to_vec(@signature) + Melos::Vec.string_to_vec(@confirmation_tag)
-    else
-      Melos::Vec.string_to_vec(@signature)
-    end
-  end
 
   def self.create(signature:, content_type:, confirmation_tag:)
     instance = self.allocate
@@ -793,7 +774,7 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
   STRUCT = [
     [:wire_format, :uint16],
     [:content, :class, Melos::Struct::FramedContent],
-    [:auth, :framed_content_auth_data]
+    [:auth, :class, Melos::Struct::FramedContentAuthData, ->(ctx){ {content_type: ctx[:content].content_type} }]
   ]
 
   def content_tbm
@@ -843,7 +824,7 @@ class Melos::Struct::PublicMessage < Melos::Struct::Base
   attr_reader :content, :auth, :membership_tag
   STRUCT = [
     [:content, :class, Melos::Struct::FramedContent],
-    [:auth, :framed_content_auth_data],
+    [:auth, :class, Melos::Struct::FramedContentAuthData, ->(ctx){ {content_type: ctx[:content].content_type} }],
     [:membership_tag, :select, ->(ctx){ctx[:content].sender.sender_type == Melos::Constants::SenderType::MEMBER}, :vec] # MAC is opaque <V>
   ]
 
@@ -926,7 +907,11 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     key, nonce, generation = Melos::SecretTree::ratchet_and_get(suite, content_type, secret_tree, leaf_index)
     new_nonce = apply_nonce_reuse_guard(nonce, reuse_guard)
 
-    private_message_content_plain = serialize_private_message_content(authenticated_content.content, authenticated_content.auth, padding_size)
+    private_message_content_plain = Melos::Struct::PrivateMessageContent.create(
+      framed_content: authenticated_content.content,
+      auth: authenticated_content.auth,
+      padding_size: padding_size
+    ).raw
     aad = private_content_aad_impl(
       authenticated_content.content.group_id,
       authenticated_content.content.epoch,
@@ -962,7 +947,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     key, nonce, _ = Melos::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
     stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
-    pmc = Melos::Struct::PrivateMessageContent.new_with_content_type(stream, content_type)
+    pmc = Melos::Struct::PrivateMessageContent.new(stream, content_type: content_type)
 
     fc = Melos::Struct::FramedContent.create(
       group_id: group_id,
@@ -996,51 +981,35 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     nonce_arr.pack('C*')
   end
 
-  def self.serialize_private_message_content(framed_content, framed_content_auth_data, padding_size)
-    buf = ''
-    case framed_content.content_type
-    when Melos::Constants::ContentType::APPLICATION
-      buf += Melos::Vec.string_to_vec(framed_content.application_data)
-    when Melos::Constants::ContentType::PROPOSAL
-      buf += framed_content.proposal.raw
-    when Melos::Constants::ContentType::COMMIT
-      buf += framed_content.commit.raw
-    end
-    buf += Melos::Vec.string_to_vec(framed_content_auth_data.signature)
-    if framed_content.content_type == Melos::Constants::ContentType::COMMIT
-      buf += Melos::Vec.string_to_vec(framed_content_auth_data.confirmation_tag)
-    end
-    buf += Melos::Crypto::Util.zero_vector(padding_size)
-    buf
-  end
 end
 
+# The selects in PrivateMessageContent depend on PrivateMessage.content_type, a field of
+# the enclosing struct, so the caller passes it in:
+#   Melos::Struct::PrivateMessageContent.new(stream, content_type: content_type)
 class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
-  attr_accessor :application_data, :proposal, :commit, :auth, :padding
-  # bytes -> struct: decode the content and auth field, rest is padding
-  # struct -> bytes: encode content and auth field, add set amount of padding (zero bytes)
+  attr_reader :application_data, :proposal, :commit, :auth, :padding, :content_type
+  STRUCT = [
+    [:application_data, :select, ->(ctx){ctx[:content_type] == Melos::Constants::ContentType::APPLICATION}, :vec],
+    [:proposal,         :select, ->(ctx){ctx[:content_type] == Melos::Constants::ContentType::PROPOSAL}, :class, Melos::Struct::Proposal],
+    [:commit,           :select, ->(ctx){ctx[:content_type] == Melos::Constants::ContentType::COMMIT}, :class, Melos::Struct::Commit],
+    [:auth, :class, Melos::Struct::FramedContentAuthData, ->(ctx){ {content_type: ctx[:content_type]} }],
+    [:padding, :padding] # the rest of the stream; zero bytes
+  ]
 
-  def self.new_with_content_type(stream, content_type)
-    instance = self.allocate
-    context = []
-    # deserialize application_data/proposal/commit
-    case content_type
+  def self.create(framed_content:, auth:, padding_size:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@content_type, framed_content.content_type)
+    case framed_content.content_type
     when Melos::Constants::ContentType::APPLICATION
-      value = Melos::Vec.parse_stream(stream)
-      context << [:application_data, value]
+      new_instance.instance_variable_set(:@application_data, framed_content.application_data)
     when Melos::Constants::ContentType::PROPOSAL
-      value = Melos::Struct::Proposal.new(stream)
-      context << [:proposal, value]
+      new_instance.instance_variable_set(:@proposal, framed_content.proposal)
     when Melos::Constants::ContentType::COMMIT
-      value = Melos::Struct::Commit.new(stream)
-      context << [:commit, value]
+      new_instance.instance_variable_set(:@commit, framed_content.commit)
     end
-    fcad = Melos::Struct::FramedContentAuthData.new_with_content_type(stream, content_type)
-    context << [:auth, fcad]
-    # assume rest is padding
-    context << [:padding, stream.read()]
-    instance.send(:set_instance_vars, context)
-    instance
+    new_instance.instance_variable_set(:@auth, auth)
+    new_instance.instance_variable_set(:@padding, Melos::Crypto::Util.zero_vector(padding_size))
+    new_instance
   end
 
   def content

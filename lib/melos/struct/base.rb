@@ -1,22 +1,26 @@
 module Melos::Struct; end
 
 class Melos::Struct::Base
-  def initialize(stream)
+  # external: values this struct's select fields depend on but which belong to an
+  # enclosing struct (e.g. FramedContent.content_type for FramedContentAuthData).
+  # They are seeded into the parse context and set as instance variables, but are
+  # not part of STRUCT and so are never serialized.
+  def initialize(stream, **external)
     stream = StringIO.new(stream) if stream.is_a?(String)
-    context = deserialize(stream)
+    context = deserialize(stream, external)
     set_instance_vars(context)
     self
   end
 
   def raw
     buf = ''
+    context = field_context
     self.class::STRUCT.each do |elem|
+      value = self.instance_variable_get("@#{elem[0]}")
       case elem[1]
       when :select
-        value = self.instance_variable_get("@#{elem[0]}")
-        buf += serialize_select_elem(value, elem[3])
+        buf += serialize_select_elem(elem[0], value, elem[2], elem[3], context)
       else
-        value = self.instance_variable_get("@#{elem[0]}")
         buf += serialize_elem(value, elem[1], elem[2])
       end
     end
@@ -36,15 +40,19 @@ class Melos::Struct::Base
   end
 
   private
-  def deserialize(stream)
-    context = []
+  # external is a Hash of values seeded into the context before parsing (see #initialize)
+  def deserialize(stream, external = {})
+    context = external.to_a
     self.class::STRUCT.each do |elem|
       case elem[1]
       when :select
         value = deserialize_select_elem_with_context(stream, context.to_h, elem[2], elem[3], elem[4])
         context << [elem[0], value]
-      when :framed_content_auth_data
-        value = Melos::Struct::FramedContentAuthData.new_with_content_type(stream, context.to_h[:content].content_type)
+      when :class
+        # [:name, :class, Klass, ->(ctx){ {external_name: value} }]
+        # the optional 4th element derives external context for the child struct from this struct's context
+        external_for_child = elem[3] ? elem[3].(context.to_h) : {}
+        value = elem[2].new(stream, **external_for_child)
         context << [elem[0], value]
       else
         value = deserialize_elem(stream, elem[1], elem[2])
@@ -122,7 +130,7 @@ class Melos::Struct::Base
       Melos::Vec.string_to_vec(value)
     when :vec_of_type
       Melos::Vec.string_to_vec(value.map { serialize_elem(_1, type_param, nil) }.join)
-    when :class, :framed_content_auth_data
+    when :class
       value.raw
     when :classes
       Melos::Vec.string_to_vec(value.map(&:raw).join)
@@ -140,11 +148,19 @@ class Melos::Struct::Base
     end
   end
 
-  def serialize_select_elem(value, type)
-    if value.nil?
-      ''
-    else
+  # every instance variable as a Hash, the same shape as the parse context,
+  # so that select predicates can be evaluated at serialization time
+  def field_context
+    instance_variables.to_h { [_1.to_s.delete_prefix('@').to_sym, instance_variable_get(_1)] }
+  end
+
+  # a select field is serialized only when its predicate holds; it must then be present
+  def serialize_select_elem(name, value, predicate, type, context)
+    if predicate.(context)
+      raise ArgumentError.new("#{self.class.name}##{name} is required by its select predicate but is nil") if value.nil?
       serialize_elem(value, type, nil)
+    else
+      ''
     end
   end
 end
