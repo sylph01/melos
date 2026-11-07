@@ -116,7 +116,7 @@ GroupContext and tree for the signature check) for `max_past_epochs:` epochs (de
 options go to `Group.create` / `.from_welcome` (and so `Client#create_group` / `#join_group`).
 AEAD failures now raise `ProtocolError`.
 
-## 7. External senders and external proposals (M) — RFC 12.1.8, 12.1.8.1, 6.1
+## 7. External senders and external proposals (M) — RFC 12.1.8, 12.1.8.1, 6.1 — done
 
 **RFC.** With an `external_senders` GroupContext extension, listed signers may send Add, Remove,
 PreSharedKey, ReInit and GroupContextExtensions proposals as PublicMessages with
@@ -137,6 +137,14 @@ group membership) is a small separate class.
 
 **Test.** An external signer removes Bob; a non-member sends its own Add; an external Update is
 rejected.
+
+**Done as.** `Struct::ExternalSenders` (the extension data, with `.extension(list)`), `Group#external_senders`,
+`#validate_non_member_content!` and `#sender_signature_key` for `external` and `new_member_proposal`;
+`resolve_proposals` gives such proposals a `nil` sender. `Melos::ExternalSender` signs proposals with
+no group state (`create_add_proposal`, `create_remove_proposal`, `create_psk_proposal`,
+`create_group_context_extensions_proposal`); `Client#create_new_member_proposal` sends a client's own
+Add. Authorization (12.1.8) is the `external_proposal_validator:` group option, accepting by default.
+Tests in `test/test_external_senders.rb`.
 
 ## 8. Persistence of client and group state (M)
 
@@ -236,5 +244,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6~~ → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6 → 7~~ → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

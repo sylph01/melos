@@ -1,6 +1,7 @@
 require_relative 'crypto'
 require_relative 'key_package_bundle'
 require_relative 'group'
+require_relative 'external_sender'
 require_relative 'struct/structs'
 
 # A client (RFC 9420 Section 5.3): a long-lived identity, i.e. a signature key pair and a
@@ -39,6 +40,19 @@ class Melos::Client
     )
     @key_packages[bundle.ref] = bundle
     bundle
+  end
+
+  # 12.1.8: ask to join a group by proposing our own Add, as a new_member_proposal signed with the
+  # KeyPackage's key. A member who commits it sends a Welcome addressed to that KeyPackage, which
+  # #join_group then accepts. group_id and epoch are the group's current ones (from a GroupInfo, say).
+  # Returns [MLSMessage, KeyPackageBundle].
+  def create_new_member_proposal(group_id:, epoch:, authenticated_data: '', **key_package_options)
+    bundle = create_key_package(**key_package_options)
+    add = Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: Melos::Struct::Add.create(key_package: bundle.key_package))
+    sender = Melos::Struct::Sender.create_new_member(Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL)
+    message = Melos::ExternalSender.sign_proposal(@cipher_suite, signature_private_key, add, sender,
+                                                  group_id: group_id, epoch: epoch, authenticated_data: authenticated_data)
+    [message, bundle]
   end
 
   # 11: create a group with this client as its only member.

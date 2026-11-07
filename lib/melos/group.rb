@@ -43,6 +43,16 @@ class Melos::Group
   # 15.3: how many epochs before the current one keep their secret trees for late application messages
   DEFAULT_MAX_PAST_EPOCHS = 2
 
+  # 12.1.8: the proposal types an external sender may send; anything else from one is malformed
+  EXTERNAL_PROPOSAL_TYPES = [
+    Melos::Constants::ProposalType::ADD, Melos::Constants::ProposalType::REMOVE, Melos::Constants::ProposalType::PSK,
+    Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS
+  ].freeze
+
+  # 12.1.8: external proposals that are not authorized are invalid; which ones are is the application's
+  # policy. The default accepts every proposal that passes the protocol's own checks.
+  DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR = ->(_authenticated_content) { true }
+
   # the options of .create and .from_welcome that configure the secret tree's ratchets (Melos::SecretTree)
   SECRET_TREE_OPTIONS = %i[max_forward_distance out_of_order_tolerance].freeze
 
@@ -54,12 +64,14 @@ class Melos::Group
   #                         the default accepts basic credentials only
   #   max_leaf_node_lifetime: longest acceptable Lifetime of a leaf node in seconds (7.2); nil for no limit
   #   max_past_epochs: how many earlier epochs still accept application messages (15.3); 0 for none
+  #   external_proposal_validator: ->(authenticated_content) { true/false }, whether a proposal from an
+  #                                external sender or a new member is authorized (12.1.8)
   # .create and .from_welcome also take max_forward_distance: and out_of_order_tolerance: for the
   # secret tree's ratchets (Melos::SecretTree); epochs created by commits inherit them.
   def initialize(suite:, group_id:, epoch:, leaf_index:, signature_private_key:, ratchet_tree:, private_tree:,
                  extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {},
                  credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME,
-                 max_past_epochs: DEFAULT_MAX_PAST_EPOCHS)
+                 max_past_epochs: DEFAULT_MAX_PAST_EPOCHS, external_proposal_validator: DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR)
     @suite = suite
     @group_id = group_id
     @epoch = epoch
@@ -75,6 +87,7 @@ class Melos::Group
     @credential_validator = credential_validator
     @max_leaf_node_lifetime = max_leaf_node_lifetime
     @max_past_epochs = max_past_epochs
+    @external_proposal_validator = external_proposal_validator
     @past_epochs = {} # epoch -> PastEpoch, for late application messages (9.1, 15.3)
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
@@ -261,8 +274,15 @@ class Melos::Group
     content = authenticated_content.content
     raise Melos::ProtocolError.new('message is for a different group') unless content.group_id == @group_id
     raise Melos::ProtocolError.new("message is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == context.epoch
-    raise Melos::ProtocolError.new('signature does not verify') unless authenticated_content.verify(@suite, sender_signature_key(content.sender, tree), context)
+    validate_non_member_content!(authenticated_content) unless content.sender.sender_type == Melos::Constants::SenderType::MEMBER
+    raise Melos::ProtocolError.new('signature does not verify') unless authenticated_content.verify(@suite, sender_signature_key(content, tree), context)
     authenticated_content
+  end
+
+  # 12.1.8.1: the senders the external_senders GroupContext extension allows, as Melos::Struct::ExternalSender (empty without it)
+  def external_senders(extensions = @extensions)
+    extension = extensions.find { _1.extension_type == Melos::Constants::ExtensionType::EXTERNAL_SENDERS }
+    extension ? Melos::Struct::ExternalSenders.new(extension.extension_data).external_senders : []
   end
 
   # the earlier epochs whose application messages are still accepted, oldest first
@@ -597,20 +617,49 @@ class Melos::Group
     end
   end
 
-  # 6.1: the key that signed a message from this sender, in tree
-  def sender_signature_key(sender, tree = @ratchet_tree)
+  # 6.1: the key that signed this FramedContent, by its sender type; members are looked up in tree
+  def sender_signature_key(content, tree = @ratchet_tree)
+    sender = content.sender
     case sender.sender_type
     when Melos::Constants::SenderType::MEMBER
       leaf_node = tree.leaf_node_at(sender.leaf_index)
       raise Melos::ProtocolError.new("sender leaf #{sender.leaf_index} is blank") if leaf_node.nil?
       leaf_node.signature_key
+    when Melos::Constants::SenderType::EXTERNAL
+      # 12.1.8: only with the external_senders extension, by index into it
+      external_sender = external_senders[sender.sender_index]
+      raise Melos::ProtocolError.new("no external sender #{sender.sender_index} in the external_senders extension") if external_sender.nil?
+      external_sender.signature_key
+    when Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL
+      # the joiner signs its own Add with the key of the KeyPackage's leaf
+      content.proposal.add.key_package.leaf_node.signature_key
     else
-      # TODO: external senders (external_senders extension) and new members (KeyPackage in the message)
-      raise Melos::UnsupportedError.new('only messages from members are supported')
+      # TODO: new-member commits
+      raise Melos::UnsupportedError.new('new_member_commit senders are not supported')
     end
   end
 
-  # 12.4: the proposals a Commit covers, by value or by reference, as [proposal, sender leaf index] pairs
+  # 6.1, 12.1.8: a message from outside the group is a PublicMessage carrying a proposal of an allowed
+  # type (only Add from a new member), and must be authorized by the application
+  def validate_non_member_content!(authenticated_content)
+    content = authenticated_content.content
+    case content.sender.sender_type
+    when Melos::Constants::SenderType::EXTERNAL, Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL
+      raise Melos::ProtocolError.new('a proposal from outside the group must be a PublicMessage') unless authenticated_content.wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
+      raise Melos::ProtocolError.new('a message from outside the group must be a proposal') unless content.content_type == Melos::Constants::ContentType::PROPOSAL
+      allowed = content.sender.sender_type == Melos::Constants::SenderType::EXTERNAL ? EXTERNAL_PROPOSAL_TYPES : [Melos::Constants::ProposalType::ADD]
+      proposal_type = content.proposal.proposal_type
+      raise Melos::ProtocolError.new("proposal type #{proposal_type} cannot be sent from outside the group by this sender") unless allowed.include?(proposal_type)
+      raise Melos::ProtocolError.new('external proposal not authorized') unless @external_proposal_validator.call(authenticated_content)
+    when Melos::Constants::SenderType::NEW_MEMBER_COMMIT
+      raise Melos::ProtocolError.new('a new_member_commit message must be a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
+    else
+      raise Melos::ProtocolError.new("unknown sender type #{content.sender.sender_type}")
+    end
+  end
+
+  # 12.4: the proposals a Commit covers, by value or by reference, as [proposal, sender leaf index] pairs;
+  # the sender is nil for a proposal from an external sender or a new member (12.1.8)
   def resolve_proposals(proposal_or_refs, committer)
     proposal_or_refs.map do |proposal_or_ref|
       if proposal_or_ref.proposal
@@ -619,8 +668,7 @@ class Melos::Group
         authenticated_content = @pending_proposals[proposal_or_ref.reference]
         raise Melos::ProtocolError.new('commit references a proposal we have not received') if authenticated_content.nil?
         sender = authenticated_content.content.sender
-        raise Melos::UnsupportedError.new('proposals from external senders are not supported yet') unless sender.sender_type == Melos::Constants::SenderType::MEMBER
-        [authenticated_content.content.proposal, sender.leaf_index]
+        [authenticated_content.content.proposal, sender.sender_type == Melos::Constants::SenderType::MEMBER ? sender.leaf_index : nil]
       end
     end
   end
@@ -662,6 +710,7 @@ class Melos::Group
       Joiner.new(leaf_index, key_package)
     end
     psk_ids = of_type.(Melos::Constants::ProposalType::PSK).map { |proposal, _sender| proposal.psk.psk }
+    external_senders(extensions) # 12.1.8.1: a malformed external_senders extension is rejected here
     # 12.2, 12.1.7: the members that remain must all be compatible with the new extensions and with each other
     validate_members!(tree, extensions)
     [extensions, joiners, psk_ids]

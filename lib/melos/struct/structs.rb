@@ -500,6 +500,21 @@ class Melos::Struct::ExternalSender < Melos::Struct::Base
   ]
 end
 
+# the extension_data of the external_senders GroupContext extension: ExternalSender external_senders<V>
+class Melos::Struct::ExternalSenders < Melos::Struct::Base
+  attr_reader :external_senders
+  STRUCT = [
+    [:external_senders, :classes, Melos::Struct::ExternalSender]
+  ]
+
+  # the GroupContext extension listing these senders
+  def self.extension(external_senders)
+    Melos::Struct::Extension.create(
+      extension_type: Melos::Constants::ExtensionType::EXTERNAL_SENDERS, extension_data: create(external_senders: external_senders).raw
+    )
+  end
+end
+
 ## 12.1
 
 class Melos::Struct::Proposal < Melos::Struct::Base
@@ -708,6 +723,14 @@ class Melos::Struct::Sender < Melos::Struct::Base
     instance = self.allocate
     instance.instance_variable_set(:@sender_type, Melos::Constants::SenderType::EXTERNAL)
     instance.instance_variable_set(:@sender_index, sender_index)
+    instance
+  end
+
+  # a sender with no index: new_member_proposal or new_member_commit
+  def self.create_new_member(sender_type)
+    raise ArgumentError.new('not a new_member sender type') unless [Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL, Melos::Constants::SenderType::NEW_MEMBER_COMMIT].include?(sender_type)
+    instance = self.allocate
+    instance.instance_variable_set(:@sender_type, sender_type)
     instance
   end
 end

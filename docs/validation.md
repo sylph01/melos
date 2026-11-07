@@ -6,8 +6,7 @@ mapped to the code; updated as validation lands (last: tier 5). Status:
 - **done**: enforced today, with where.
 - **partial**: enforced in some paths or weaker than the RFC asks.
 - **missing**: not enforced.
-- **n/a**: for features melos does not implement yet (external senders, external commits,
-  ReInit, branching); the code rejects these inputs with a clear error instead.
+- **n/a**: for features melos does not implement yet (external commits, ReInit, branching); the code rejects these inputs with a clear error instead.
 
 Items marked *(application)* are MUSTs the RFC places on the application or the Authentication
 Service; melos should offer a hook or a documented default, not decide the policy.
@@ -16,9 +15,9 @@ Service; melos should offer a hook or a documented default, not decide the polic
 
 | # | Requirement | RFC | Status | Code |
 |---|---|---|---|---|
-| 1.1 | Verify the signature with the key selected by sender_type | 6.1 | partial | `Group#unprotect`, `#sender_signature_key`: member only; external, new_member_proposal, new_member_commit raise "not supported" |
-| 1.2 | external sender: content_type MUST be proposal, proposal_type MUST be one allowed for external senders | 6.1, 12.1.8 | n/a | rejected with 1.1 |
-| 1.3 | new_member_commit: content_type MUST be commit; new_member_proposal: proposal of type add | 6.1 | n/a | rejected with 1.1 |
+| 1.1 | Verify the signature with the key selected by sender_type | 6.1 | partial | `Group#unprotect`, `#sender_signature_key`: member (leaf), external (external_senders entry), new_member_proposal (the Add's KeyPackage leaf); new_member_commit raises "not supported" |
+| 1.2 | external sender: content_type MUST be proposal, proposal_type MUST be one allowed for external senders | 6.1, 12.1.8 | done | `#validate_non_member_content!` with `EXTERNAL_PROPOSAL_TYPES` |
+| 1.3 | new_member_commit: content_type MUST be commit; new_member_proposal: proposal of type add | 6.1 | done | `#validate_non_member_content!` |
 | 1.4 | PublicMessage: check membership_tag for member senders | 6.2 | done | `PublicMessage#unprotect` returns nil, `Group#unprotect` raises |
 | 1.5 | FramedContentAuthData valid: signature and, for commits, confirmation_tag | 6.1, 6.2, 6.3.1 | done | signature in `Group#unprotect`; tag in `Group#stage` |
 | 1.6 | PrivateMessage padding MUST be all zero bytes; reject otherwise | 6.3.1 | done | `PrivateMessage#unprotect` via `PrivateMessageContent#padding_zero?` |
@@ -41,7 +40,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 2.6 | PreSharedKey: resumption with usage reinit or branch is invalid outside those operations | 12.1.4, 11.2, 11.3 | **missing** | `#psk_secret_for` looks up any resumption PSK by epoch regardless of usage |
 | 2.7 | ReInit: version MUST NOT be lower than the current one | 12.1.5 | n/a | ReInit rejected as unsupported |
 | 2.8 | GroupContextExtensions: invalid if required_capabilities not supported by all members after the commit | 12.1.7, 11.1 | done | `#validate_members!` after the list is applied |
-| 2.9 | External proposals MUST be PublicMessage; only add, remove, psk, reinit, gce from external senders; external_senders extension must be present | 12.1.8 | n/a | rejected with 1.1 |
+| 2.9 | External proposals MUST be PublicMessage; only add, remove, psk, reinit, gce from external senders; external_senders extension must be present; unauthorized external proposals are invalid | 12.1.8 | done | `#validate_non_member_content!`, `#sender_signature_key`; authorization is the `external_proposal_validator:` hook *(application)*, accepting by default |
 | 2.10 | Unknown (non-default) proposal types MUST be supported by every member that processes the commit | 12.2, 13.2 | done | `#apply_proposals` rejects any type outside `KNOWN_PROPOSAL_TYPES` |
 
 ## 3. Proposal list validation (Section 12.2), on both creating and processing a Commit
@@ -165,4 +164,4 @@ Service; melos should offer a hook or a documented default, not decide the polic
 3. ~~**KeyPackage and LeafNode validation**: sections 4 and 5 as one `LeafNode` validator parameterized by context (key_package / update / commit / tree), used by Add processing, commit path processing and join; includes signature, source, extension and capability checks, key uniqueness. Credential validation and maximum lifetime become hooks with defaults.~~ Done.
 4. ~~**Join integrity**: 7.8 to 7.12 and 7.14 on top of the validator from step 3.~~ Done.
 5. ~~**Client-level**: 7.5 group_id uniqueness, 7.1 KeyPackage suite check.~~ Done.
-6. **Later, with the features they belong to**: external senders (1.2, 2.9), resumption PSK rules (2.6, 7.3), ReInit, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.
+6. **Later, with the features they belong to**: ~~external senders (1.2, 2.9)~~, resumption PSK rules (2.6, 7.3), ReInit, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.

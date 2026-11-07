@@ -19,6 +19,7 @@ As of version 0.1.0, this implements:
   application messages as PrivateMessage, handshake messages as PublicMessage or PrivateMessage
 - Update proposals, commits without an UpdatePath where the RFC allows them, exporters
 - The deletion schedule of Section 9.2 (as far as Ruby allows: references are dropped, strings are not zeroized)
+- External senders and new-member proposals (`Melos::ExternalSender`, `Client#create_new_member_proposal`)
 - Out-of-order application messages and messages from recent epochs, with bounds on both (Section 15.3)
 - Most MUST-level validations of the RFC; [docs/validation.md](docs/validation.md) maps each one to the code
 - All test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md),
@@ -26,7 +27,7 @@ As of version 0.1.0, this implements:
 
 It does not yet implement:
 
-- ReInit, external commits (ExternalInit), external senders, resumption PSKs, subgroup branching
+- ReInit, external commits (ExternalInit), resumption PSKs, subgroup branching
 - Credential validation beyond basic credentials (an application hook, `credential_validator:`, is provided)
 - Persistence of client and group state
 - Interop testing against other implementations
