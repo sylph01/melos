@@ -7,7 +7,7 @@ S (hours), M (a day or two), L (a week or more). Items are independent unless no
 The list comes from the "not yet" section of the README, the deferred rows of
 [validation.md](validation.md), and the `TODO` comments in `lib/`.
 
-## 1. Exporters (S) — RFC 8.5
+## 1. Exporters (S) — RFC 8.5 — done in 7c57cac
 
 **RFC.** `MLS-Exporter(Label, Context, Length) = ExpandWithLabel(DeriveSecret(exporter_secret, Label), "exported", Hash(Context), Length)`.
 
@@ -20,7 +20,7 @@ delegating to the current epoch. Also expose `Group#epoch_authenticator` (exists
 **Test.** There is no exporter vector in mls-implementations; test determinism between two members in
 the round-trip test, and against a hand computation in `test_key_schedule.rb`.
 
-## 2. An error class hierarchy (S)
+## 2. An error class hierarchy (S) — done in 43a039d
 
 **Have.** Every rejection raises `ArgumentError` with a message. Callers cannot tell a malformed
 message from a wrong argument, or a commit that removed them from a tampered one.
@@ -33,7 +33,7 @@ Keep `ArgumentError` for genuine caller mistakes. `test_validation.rb` then asse
 
 Do this before 3 to 12, since all of them add error sites.
 
-## 3. Partial commits: omit the UpdatePath when allowed (S) — RFC 12.4
+## 3. Partial commits: omit the UpdatePath when allowed (S) — RFC 12.4 — done in e9a27c9
 
 **RFC.** The path MAY be omitted when the commit covers at least one proposal and none of them is of a
 path-required type (Update, Remove, ExternalInit, GroupContextExtensions). The commit secret is then
@@ -229,5 +229,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) started as soon as 3 and 4 are in,
+~~2 → 1 → 3~~ → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) started as soon as 4 is in,
 since it is the strongest check on everything else and takes calendar time rather than code.
