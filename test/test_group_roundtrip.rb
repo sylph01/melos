@@ -67,6 +67,15 @@ suite_ids.each do |suite_id|
   assert_equal true, alice_group.private_tree.consistent?(alice_group.ratchet_tree)
   puts "[pass] Alice adds Bob and Bob joins from the Welcome"
 
+  ## Exported secrets agree between members and depend on label, context and length
+  exported = alice_group.export_secret("app", "ctx", 32)
+  assert_equal exported, bob_group.export_secret("app", "ctx", 32)
+  assert_equal 32, exported.bytesize
+  refute_equal exported, alice_group.export_secret("other", "ctx", 32)
+  refute_equal exported, alice_group.export_secret("app", "other", 32)
+  assert_equal 16, alice_group.export_secret("app", "ctx", 16).bytesize
+  puts "[pass] Exported secrets agree between members"
+
   ## Bob sends an application message, Alice reads it
   authenticated_content = deliver(alice_group, bob_group.create_application_message("hello from bob"))
   assert_equal "hello from bob", authenticated_content.content.application_data

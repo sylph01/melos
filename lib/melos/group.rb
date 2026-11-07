@@ -204,6 +204,11 @@ class Melos::Group
     @epoch_secrets.epoch_authenticator
   end
 
+  # 8.5: a secret derived from this epoch for the application's own use; every member gets the same value
+  def export_secret(label, context, length)
+    @epoch_secrets.export(label, context, length)
+  end
+
   ## Receiving messages (6, 12.4)
 
   # Unprotect an MLSMessage sent in this group in the current epoch and verify its signature.

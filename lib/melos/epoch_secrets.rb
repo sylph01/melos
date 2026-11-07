@@ -95,6 +95,11 @@ class Melos::EpochSecrets
     self.class.from_joiner(@suite, joiner_secret, psk_secret, group_context, n_leaves: n_leaves)
   end
 
+  # 8.5: MLS-Exporter(label, context, length) = ExpandWithLabel(DeriveSecret(exporter_secret, label), "exported", Hash(context), length)
+  def export(label, context, length)
+    Melos::Crypto.expand_with_label(@suite, Melos::Crypto.derive_secret(@suite, exporter_secret, label), "exported", Melos::Crypto.hash(@suite, context), length)
+  end
+
   # 9: this epoch's secret tree, built on first use
   def secret_tree
     raise ArgumentError.new('n_leaves is needed to build the secret tree') if @n_leaves.nil?
