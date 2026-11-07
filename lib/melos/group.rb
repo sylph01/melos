@@ -77,13 +77,16 @@ class Melos::Group
   #                                external sender or a new member is authorized (12.1.8)
   #   resumption_psk_lookup: ->(group_id, epoch) { psk or nil }, the resumption PSKs of other groups (8.6); Melos::Client supplies it
   #   max_resumption_psks: how many epochs' resumption PSKs of this group are kept (8.6)
+  #   member_matcher: ->(old_leaf, new_leaf) { true/false }, whether two leaves are the same member (11.2, 11.3,
+  #                   and the old and new leaf of a resync external commit, 12.2)
   # .create and .from_welcome also take max_forward_distance: and out_of_order_tolerance: for the
   # secret tree's ratchets (Melos::SecretTree); epochs created by commits inherit them.
   def initialize(suite:, group_id:, epoch:, leaf_index:, signature_private_key:, ratchet_tree:, private_tree:,
                  extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {},
                  credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME,
                  max_past_epochs: DEFAULT_MAX_PAST_EPOCHS, external_proposal_validator: DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR,
-                 resumption_psk_lookup: nil, max_resumption_psks: DEFAULT_MAX_RESUMPTION_PSKS)
+                 resumption_psk_lookup: nil, max_resumption_psks: DEFAULT_MAX_RESUMPTION_PSKS,
+                 member_matcher: DEFAULT_MEMBER_MATCHER, confirmation_tag: nil)
     @suite = suite
     @group_id = group_id
     @epoch = epoch
@@ -102,8 +105,12 @@ class Melos::Group
     @external_proposal_validator = external_proposal_validator
     @resumption_psk_lookup = resumption_psk_lookup
     @max_resumption_psks = max_resumption_psks
+    @member_matcher = member_matcher
+    @confirmation_tag = confirmation_tag # of the Commit that started this epoch (8.2), for GroupInfos (12.4.3)
     @past_epochs = {} # epoch -> PastEpoch, for late application messages (9.1, 15.3)
-    @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
+    @resumption_psks = {} # epoch -> resumption_psk (8.4)
+    @resumption_psks[epoch] = epoch_secrets.resumption_psk if epoch_secrets.available?(:resumption_psk)
+    @external_joiner = false # true while this is a joiner's view of the epoch before its external commit (12.4.3.2)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @pending_updates = {}   # encryption_key -> private key, for Update proposals we sent this epoch (12.1.2)
     @group_context = nil
@@ -146,7 +153,7 @@ class Melos::Group
       suite: suite, group_id: group_id, epoch: 0, leaf_index: 0, signature_private_key: signature_private_key,
       ratchet_tree: ratchet_tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: '', interim_transcript_hash: interim_transcript_hash(suite, '', confirmation_tag),
-      epoch_secrets: epoch_secrets.discard_consumed!, external_psks: external_psks, **options
+      epoch_secrets: epoch_secrets.discard_consumed!, external_psks: external_psks, confirmation_tag: confirmation_tag, **options
     )
   end
 
@@ -211,21 +218,7 @@ class Melos::Group
       Melos::Crypto.aead_decrypt(suite, welcome_key, welcome_nonce, "", welcome.encrypted_group_info)
     )
     group_context = group_info.group_context
-    raise Melos::ProtocolError.new("unsupported MLS version #{group_context.version} in GroupContext") unless group_context.version == Melos::Constants::Version::MLS10
-    raise Melos::ProtocolError.new('GroupInfo is for a different cipher suite') unless group_context.cipher_suite == suite.suite_id
-    Melos::Struct::Extension.check_unique_types!(group_context.extensions, 'GroupContext extensions')
-    Melos::Struct::Extension.check_unique_types!(group_info.extensions, 'GroupInfo extensions')
-
-    # The ratchet tree: delivered out of band, or in the GroupInfo's ratchet_tree extension
-    ratchet_tree_data = ratchet_tree || group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }&.extension_data
-    raise ArgumentError.new('no ratchet tree available') if ratchet_tree_data.nil?
-    tree = Melos::RatchetTree.parse(suite, ratchet_tree_data)
-    raise Melos::ProtocolError.new('tree hash does not match GroupContext') unless tree.root_tree_hash == group_context.tree_hash
-
-    # Verify the GroupInfo signature with the signer's leaf
-    signer_leaf_node = tree.leaf_node_at(group_info.signer)
-    raise Melos::ProtocolError.new('GroupInfo signer is not in the tree') if signer_leaf_node.nil?
-    raise Melos::ProtocolError.new('GroupInfo signature does not verify') unless group_info.verify(suite, signer_leaf_node.signature_key)
+    tree = verified_group_info_tree(suite, group_info, ratchet_tree)
 
     # Find our own leaf: the one identical to our KeyPackage's LeafNode
     leaf_index = tree.find_leaf_index { _1.raw == key_package.leaf_node.raw }
@@ -249,7 +242,8 @@ class Melos::Group
       signature_private_key: signature_private_key, ratchet_tree: tree, private_tree: private_tree,
       extensions: group_context.extensions, confirmed_transcript_hash: group_context.confirmed_transcript_hash,
       interim_transcript_hash: interim_transcript_hash(suite, group_context.confirmed_transcript_hash, group_info.confirmation_tag),
-      epoch_secrets: epoch_secrets, external_psks: external_psks, resumption_psk_lookup: resumption_psk_lookup, **options
+      epoch_secrets: epoch_secrets, external_psks: external_psks, resumption_psk_lookup: resumption_psk_lookup,
+      member_matcher: member_matcher, confirmation_tag: group_info.confirmation_tag, **options
     )
     group.send(:validate_joined_state!)
     unless resumed_psk_ids.empty?
@@ -257,6 +251,64 @@ class Melos::Group
     end
     epoch_secrets.discard_consumed! # 9.2: the joiner secret has done its work
     group
+  end
+
+  # 12.4.3.1, 12.4.3.2: check a GroupInfo's version, suite and extensions, find its ratchet tree (given, or in the
+  # ratchet_tree extension), check the tree hash and the signature by the signer's leaf. Returns the tree.
+  def self.verified_group_info_tree(suite, group_info, ratchet_tree)
+    group_context = group_info.group_context
+    raise Melos::ProtocolError.new("unsupported MLS version #{group_context.version} in GroupContext") unless group_context.version == Melos::Constants::Version::MLS10
+    raise Melos::ProtocolError.new('GroupInfo is for a different cipher suite') unless group_context.cipher_suite == suite.suite_id
+    Melos::Struct::Extension.check_unique_types!(group_context.extensions, 'GroupContext extensions')
+    Melos::Struct::Extension.check_unique_types!(group_info.extensions, 'GroupInfo extensions')
+
+    # The ratchet tree: delivered out of band, or in the GroupInfo's ratchet_tree extension
+    ratchet_tree_data = ratchet_tree || group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }&.extension_data
+    raise ArgumentError.new('no ratchet tree available') if ratchet_tree_data.nil?
+    tree = Melos::RatchetTree.parse(suite, ratchet_tree_data)
+    raise Melos::ProtocolError.new('tree hash does not match GroupContext') unless tree.root_tree_hash == group_context.tree_hash
+
+    # Verify the GroupInfo signature with the signer's leaf
+    signer_leaf_node = tree.leaf_node_at(group_info.signer)
+    raise Melos::ProtocolError.new('GroupInfo signer is not in the tree') if signer_leaf_node.nil?
+    raise Melos::ProtocolError.new('GroupInfo signature does not verify') unless group_info.verify(suite, signer_leaf_node.signature_key)
+    tree
+  end
+
+  # 12.4.3.2: join a group by external commit, from a GroupInfo (or the MLSMessage carrying it) that has an
+  # external_pub extension. The joiner's leaf takes the credential, capabilities and extensions of leaf_node
+  # (a KeyPackage's leaf, say); the commit's path gives it fresh keys.
+  #   remove: the leaf index of an earlier appearance of this member to replace (a "resync" commit)
+  #   psk_ids: ids of external PSKs (in external_psks) to inject
+  # Returns [group, CommitResult]: send result.commit, and call group.merge_commit(result.staged) once the
+  # Delivery Service has accepted it. Until then the group is only a view of the epoch being joined.
+  def self.join_by_external_commit(suite, group_info, signature_private_key:, leaf_node:, ratchet_tree: nil, remove: nil, psk_ids: [],
+                                   external_psks: {}, authenticated_data: '', **options)
+    if group_info.is_a?(Melos::Struct::MLSMessage)
+      check_message_version!(group_info)
+      group_info = group_info.group_info
+    end
+    raise ArgumentError.new('not a GroupInfo') if group_info.nil?
+    secret_tree_options = options.slice(*SECRET_TREE_OPTIONS)
+    options = options.except(*SECRET_TREE_OPTIONS)
+    tree = verified_group_info_tree(suite, group_info, ratchet_tree)
+    external_pub = group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::EXTERNAL_PUB }
+    raise Melos::ProtocolError.new('GroupInfo has no external_pub extension') if external_pub.nil?
+    kem_output, init_secret = Melos::Crypto.external_init_sender(suite, Melos::Struct::ExternalPub.new(external_pub.extension_data).external_pub)
+
+    group_context = group_info.group_context
+    # 8.3: the epoch being joined is known only by the init secret the joiner sends to it
+    group = new(
+      suite: suite, group_id: group_context.group_id, epoch: group_context.epoch, leaf_index: nil,
+      signature_private_key: signature_private_key, ratchet_tree: tree, private_tree: Melos::PrivateTree.new,
+      extensions: group_context.extensions, confirmed_transcript_hash: group_context.confirmed_transcript_hash,
+      interim_transcript_hash: interim_transcript_hash(suite, group_context.confirmed_transcript_hash, group_info.confirmation_tag),
+      epoch_secrets: Melos::EpochSecrets.from_init_secret(suite, init_secret, secret_tree_options: secret_tree_options),
+      external_psks: external_psks, confirmation_tag: group_info.confirmation_tag, **options
+    )
+    group.instance_variable_set(:@external_joiner, true)
+    group.send(:validate_tree!, tree, group_context.extensions)
+    [group, group.send(:create_external_commit, kem_output, leaf_node, remove: remove, psk_ids: psk_ids, authenticated_data: authenticated_data)]
   end
 
   # 8.4: a resumption PSK's usage must be one of the defined values
@@ -315,14 +367,14 @@ class Melos::Group
       past_epochs: @past_epochs.map do |epoch, past|
         [epoch, { epoch_secrets: past.epoch_secrets.to_h, group_context: past.group_context.raw, ratchet_tree: past.ratchet_tree.raw }]
       end,
-      active: @active, pending_reinit: @pending_reinit&.raw,
+      active: @active, pending_reinit: @pending_reinit&.raw, confirmation_tag: @confirmation_tag,
       max_leaf_node_lifetime: @max_leaf_node_lifetime, max_past_epochs: @max_past_epochs, max_resumption_psks: @max_resumption_psks
     }
   end
 
   # A group from #to_h.
   #   external_psks: the Hash to share with the restored group (a Client passes its own); defaults to the saved ones
-  #   options: credential_validator:, external_proposal_validator:, resumption_psk_lookup:, as for .create
+  #   options: credential_validator:, external_proposal_validator:, resumption_psk_lookup:, member_matcher:, as for .create
   def self.from_h(hash, external_psks: nil, **options)
     raise ArgumentError.new("unknown group state format #{hash[:format]}") unless hash[:format] == STATE_FORMAT
     suite = Melos::Crypto::CipherSuite.new(hash[:cipher_suite])
@@ -335,10 +387,28 @@ class Melos::Group
       epoch_secrets: Melos::EpochSecrets.from_h(suite, hash[:epoch_secrets]),
       external_psks: external_psks || (hash[:external_psks] || []).to_h,
       max_leaf_node_lifetime: hash[:max_leaf_node_lifetime], max_past_epochs: hash[:max_past_epochs],
-      max_resumption_psks: hash[:max_resumption_psks], **options
+      max_resumption_psks: hash[:max_resumption_psks], confirmation_tag: hash[:confirmation_tag], **options
     )
     group.send(:restore_state, hash)
     group
+  end
+
+  # 12.4.3, 12.4.3.2: a signed GroupInfo for the current epoch, as an MLSMessage. With external_pub, it carries
+  # the epoch's external public key (8.3) so that a new member can join by external commit; with
+  # include_ratchet_tree, the tree (12.4.3.3).
+  def group_info(external_pub: true, include_ratchet_tree: true)
+    ensure_active!
+    raise Melos::StateError.new('the confirmation tag of this epoch is not known') if @confirmation_tag.nil?
+    extensions = []
+    if external_pub
+      _private, public_key = Melos::Crypto.external_key_pair(@suite, @epoch_secrets.external_secret)
+      extensions << Melos::Struct::Extension.create(extension_type: Melos::Constants::ExtensionType::EXTERNAL_PUB,
+                                                    extension_data: Melos::Struct::ExternalPub.create(external_pub: public_key).raw)
+    end
+    extensions << Melos::Struct::Extension.create(extension_type: Melos::Constants::ExtensionType::RATCHET_TREE, extension_data: @ratchet_tree.raw) if include_ratchet_tree
+    info = Melos::Struct::GroupInfo.create(group_context: group_context, extensions: extensions, confirmation_tag: @confirmation_tag, signer: @leaf_index, signature: nil)
+    info.sign(@suite, @signature_private_key)
+    Melos::Struct::MLSMessage.create(group_info: info)
   end
 
   ## Receiving messages (6, 12.4)
@@ -426,7 +496,9 @@ class Melos::Group
       @pending_proposals = {}
       return self
     end
-    retain_past_epoch!
+    retain_past_epoch! unless @external_joiner
+    @external_joiner = false
+    @confirmation_tag = staged.confirmation_tag
     @ratchet_tree = staged.ratchet_tree
     @private_tree = staged.private_tree
     @extensions = staged.extensions
@@ -641,23 +713,42 @@ class Melos::Group
     content = authenticated_content.content
     raise ArgumentError.new('not a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
     raise Melos::ProtocolError.new("commit is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == @epoch
-    # TODO: external and new-member commits
-    raise Melos::UnsupportedError.new('only commits from members are supported') unless content.sender.sender_type == Melos::Constants::SenderType::MEMBER
-    committer = content.sender.leaf_index
-    raise ArgumentError.new('our own commit must be staged through create_commit') if committer == @leaf_index && own_path.nil?
     commit = content.commit
+    case content.sender.sender_type
+    when Melos::Constants::SenderType::MEMBER
+      external = false
+      committer = content.sender.leaf_index
+      raise ArgumentError.new('our own commit must be staged through create_commit') if committer == @leaf_index && own_path.nil?
+    when Melos::Constants::SenderType::NEW_MEMBER_COMMIT
+      # 12.4.3.2: an external commit has a path, no proposals by reference, and its committer's leaf is placed below
+      external = true
+      committer = nil
+      raise Melos::ProtocolError.new('an external commit must have a path') if commit.path.nil?
+      raise Melos::ProtocolError.new('an external commit must not reference proposals') if commit.proposals.any?(&:reference)
+    else
+      raise Melos::ProtocolError.new("a commit cannot come from sender type #{content.sender.sender_type}")
+    end
+    raise ArgumentError.new('our external commit must be staged through Group.join_by_external_commit') if @external_joiner && own_path.nil?
 
     proposals = resolve_proposals(commit.proposals, committer)
-    validate_proposal_list!(proposals, committer)
+    external ? validate_external_proposal_list!(proposals) : validate_proposal_list!(proposals, committer)
     raise Melos::ProtocolError.new('commit must have a path') if commit.path.nil? && path_required?(proposals)
 
     tree = @ratchet_tree.dup
     private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
-    extensions, joiners, psk_ids = apply_proposals(tree, proposals, sending: !own_path.nil?)
+    extensions, joiners, psk_ids = apply_proposals(tree, proposals, sending: !own_path.nil?, external: external)
+    if external
+      # the joiner takes the leftmost blank leaf, as an Add would (after the Remove of a resync, 12.3)
+      committer = tree.add_leaf_node(commit.path.leaf_node)
+      raise ArgumentError.new('the external commit was built for another leaf') if own_path && committer != @leaf_index
+      validate_resync!(proposals, commit.path.leaf_node)
+    end
 
     # 12.4.2: a commit may remove us; we cannot follow it any further, since the path is not encrypted to us.
     # Our leaf index may be non-blank afterwards if an Add in the same commit reused it, so look at the Removes themselves.
-    removes_us = proposals.any? { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::REMOVE && proposal.remove.removed == @leaf_index }
+    # (A joiner's own external commit never removes the joiner, even when a resync frees the leaf it then takes.)
+    removes_us = !@external_joiner &&
+                 proposals.any? { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::REMOVE && proposal.remove.removed == @leaf_index }
     if removes_us
       return StagedCommit.new(ratchet_tree: tree, extensions: extensions, joiners: joiners, psk_ids: psk_ids, removes_us: true)
     end
@@ -667,7 +758,7 @@ class Melos::Group
     if commit.path.nil?
       commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
     else
-      validate_update_path!(tree, commit.path, committer, joiners, extensions) unless own_path
+      validate_update_path!(tree, commit.path, committer, joiners, extensions, new_leaf: external) unless own_path
       tree.merge_update_path(committer, commit.path)
       if own_path
         commit_secret = own_path[:commit_secret]
@@ -690,7 +781,15 @@ class Melos::Group
     )
 
     # 8: the next epoch's key schedule, and the confirmation tag that goes with it
-    epoch_secrets = @epoch_secrets.next(commit_secret, psk_secret_for(psk_ids), new_group_context, n_leaves: tree.n_leaves)
+    # 8.3: an external commit starts the new epoch from the init secret the joiner sent in its ExternalInit
+    base = @epoch_secrets
+    if external && !own_path
+      external_private_key, _public_key = Melos::Crypto.external_key_pair(@suite, @epoch_secrets.external_secret)
+      kem_output = proposals.find { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::EXTERNAL_INIT }.first.external_init.kem_output
+      base = Melos::EpochSecrets.from_init_secret(@suite, Melos::Crypto.external_init_receiver(@suite, external_private_key, kem_output),
+                                                  secret_tree_options: @epoch_secrets.secret_tree_options)
+    end
+    epoch_secrets = base.next(commit_secret, psk_secret_for(psk_ids), new_group_context, n_leaves: tree.n_leaves)
     confirmation_tag = Melos::Crypto.mac(@suite, epoch_secrets.confirmation_key, confirmed_transcript_hash)
     if own_path.nil? && authenticated_content.auth.confirmation_tag != confirmation_tag
       raise Melos::ProtocolError.new('confirmation tag does not verify')
@@ -777,9 +876,13 @@ class Melos::Group
     when Melos::Constants::SenderType::NEW_MEMBER_PROPOSAL
       # the joiner signs its own Add with the key of the KeyPackage's leaf
       content.proposal.add.key_package.leaf_node.signature_key
+    when Melos::Constants::SenderType::NEW_MEMBER_COMMIT
+      # 12.4.3.2: an external commit is signed with the key of its path's leaf
+      leaf_node = content.commit.path&.leaf_node
+      raise Melos::ProtocolError.new('an external commit must have a path') if leaf_node.nil?
+      leaf_node.signature_key
     else
-      # TODO: new-member commits
-      raise Melos::UnsupportedError.new('new_member_commit senders are not supported')
+      raise Melos::ProtocolError.new("unknown sender type #{sender.sender_type}")
     end
   end
 
@@ -796,6 +899,7 @@ class Melos::Group
       raise Melos::ProtocolError.new("proposal type #{proposal_type} cannot be sent from outside the group by this sender") unless allowed.include?(proposal_type)
       raise Melos::ProtocolError.new('external proposal not authorized') unless @external_proposal_validator.call(authenticated_content)
     when Melos::Constants::SenderType::NEW_MEMBER_COMMIT
+      raise Melos::ProtocolError.new('an external commit must be a PublicMessage') unless authenticated_content.wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
       raise Melos::ProtocolError.new('a new_member_commit message must be a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
     else
       raise Melos::ProtocolError.new("unknown sender type #{content.sender.sender_type}")
@@ -821,14 +925,14 @@ class Melos::Group
   # validating each leaf node that goes in (7.3, 10.1) and the resulting membership (12.2).
   #   sending: we are the committer, so lifetimes are checked against the current time (7.3)
   # Returns [extensions, joiners (Joiner for each added member), psk_ids]
-  def apply_proposals(tree, proposals, sending:)
+  #   external: the list of an external commit, where ExternalInit belongs (12.2)
+  def apply_proposals(tree, proposals, sending:, external: false)
     of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
     types = proposals.map { |proposal, _sender| proposal.proposal_type }
     # 12.2, 13.2: a proposal type not supported by every member makes the list invalid; we support only the RFC's own types
     unknown = types - KNOWN_PROPOSAL_TYPES
     raise Melos::UnsupportedError.new("unknown proposal types: #{unknown.map { '0x%04x' % _1 }.join(', ')}") unless unknown.empty?
-    unsupported = types & [Melos::Constants::ProposalType::EXTERNAL_INIT]
-    raise Melos::UnsupportedError.new("unsupported proposal types: #{unsupported.map { Melos::Constants::ProposalType::NAMES[_1] }.join(', ')}") unless unsupported.empty?
+    raise Melos::ProtocolError.new('an ExternalInit proposal is only valid in an external commit') if !external && types.include?(Melos::Constants::ProposalType::EXTERNAL_INIT)
     extensions = @extensions
     of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS).each do |proposal, _sender|
       Melos::Struct::Extension.check_unique_types!(proposal.group_context_extensions.extensions, 'GroupContextExtensions proposal')
@@ -911,10 +1015,48 @@ class Melos::Group
     @resumption_override = nil
   end
 
+  # 12.4.3.2 (joiner): the external commit, from the view of the epoch built by .join_by_external_commit:
+  # ExternalInit, the Remove of a resync, PSKs, all by value, and a path from the leftmost blank leaf
+  def create_external_commit(kem_output, leaf_node, remove:, psk_ids:, authenticated_data:)
+    proposals = [Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::EXTERNAL_INIT,
+                                                external_init: Melos::Struct::ExternalInit.create(kem_output: kem_output))]
+    proposals << Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: remove)) if remove
+    psk_ids.each do |psk_id|
+      raise ArgumentError.new('unknown external PSK') unless @external_psks.key?(psk_id)
+      psk = Melos::Struct::PreSharedKeyID.create_external(psk_id: psk_id, psk_nonce: SecureRandom.random_bytes(@suite.kdf.n_h))
+      proposals << Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: Melos::Struct::PreSharedKey.create(psk: psk))
+    end
+    pairs = proposals.map { [_1, nil] }
+    validate_external_proposal_list!(pairs)
+
+    tree = @ratchet_tree.dup
+    private_tree = Melos::PrivateTree.new
+    extensions, _joiners, _psk_ids = apply_proposals(tree, pairs, sending: true, external: true)
+    @leaf_index = tree.add_leaf_node(leaf_node) # a template: the path replaces it with a leaf of source commit
+    provisional_group_context = Melos::Struct::GroupContext.create(
+      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
+      tree_hash: '', confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions
+    )
+    update = tree.create_update_path(private_tree, @leaf_index, @signature_private_key, provisional_group_context)
+    validate_leaf_node!(update[:update_path].leaf_node, context: :commit, leaf_index: @leaf_index, tree: tree, extensions: extensions, sending: true)
+
+    commit = Melos::Struct::Commit.create(
+      proposals: proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) },
+      path: update[:update_path]
+    )
+    authenticated_content = frame_and_sign(
+      Melos::Constants::ContentType::COMMIT, commit, wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, authenticated_data: authenticated_data,
+      sender: Melos::Struct::Sender.create_new_member(Melos::Constants::SenderType::NEW_MEMBER_COMMIT)
+    )
+    staged = stage(authenticated_content, own_path: { private_tree: private_tree, commit_secret: update[:commit_secret], path_secrets: nil })
+    authenticated_content.auth.confirmation_tag = staged.confirmation_tag
+    CommitResult.new(commit: protect_authenticated_content(authenticated_content, padding_size: 0), welcome: nil, staged: staged)
+  end
+
   # 6: FramedContent -> AuthenticatedContent, signed with our key in the current GroupContext
-  def frame_and_sign(content_type, content, wire_format:, authenticated_data:)
+  def frame_and_sign(content_type, content, wire_format:, authenticated_data:, sender: Melos::Struct::Sender.create_member(@leaf_index))
     framed_content = Melos::Struct::FramedContent.create(
-      group_id: @group_id, epoch: @epoch, sender: Melos::Struct::Sender.create_member(@leaf_index),
+      group_id: @group_id, epoch: @epoch, sender: sender,
       authenticated_data: authenticated_data, content_type: content_type, content: content
     )
     authenticated_content = Melos::Struct::AuthenticatedContent.create(wire_format: wire_format, content: framed_content, auth: nil)
@@ -926,7 +1068,9 @@ class Melos::Group
   def protect_authenticated_content(authenticated_content, padding_size:)
     case authenticated_content.wire_format
     when Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
-      message = Melos::Struct::PublicMessage.protect(authenticated_content, @suite, @epoch_secrets.membership_key, group_context)
+      # 6.2: only a member's message carries a membership tag
+      member = authenticated_content.content.sender.sender_type == Melos::Constants::SenderType::MEMBER
+      message = Melos::Struct::PublicMessage.protect(authenticated_content, @suite, member ? @epoch_secrets.membership_key : nil, group_context)
       Melos::Struct::MLSMessage.create(public_message: message)
     when Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE
       message = Melos::Struct::PrivateMessage.protect(authenticated_content, @suite, @epoch_secrets.secret_tree, @epoch_secrets.sender_data_secret, padding_size)

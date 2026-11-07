@@ -267,6 +267,26 @@ class Melos::Crypto
     ctx.open(aad, ct)
   end
 
+  # 8.3: the external key pair of an epoch, [private, public], from its external_secret
+  def self.external_key_pair(suite, external_secret)
+    derive_key_pair(suite, external_secret)
+  end
+
+  # 8.3 (joiner): kem_output, context = SetupBaseS(external_pub, ""); init_secret = context.export("MLS 1.0 external init secret", KDF.Nh)
+  # Returns [kem_output, init_secret].
+  def self.external_init_sender(suite, external_pub)
+    context = suite.hpke.setup_base_s(suite.pkey.deserialize_public_encapsulation_key(external_pub), '')
+    [context[:enc], context[:context_s].export('MLS 1.0 external init secret', suite.kdf.n_h)]
+  end
+
+  # 8.3 (members): context = SetupBaseR(kem_output, external_priv, ""); the same init_secret
+  def self.external_init_receiver(suite, external_private_key, kem_output)
+    context = suite.hpke.setup_base_r(kem_output, suite.pkey.deserialize_private_encapsulation_key(external_private_key), '')
+    context.export('MLS 1.0 external init secret', suite.kdf.n_h)
+  rescue OpenSSL::PKey::PKeyError, ArgumentError => e
+    raise Melos::ProtocolError.new("ExternalInit kem_output is invalid: #{e.message}")
+  end
+
   def self.encrypt_with_label(suite, public_key, label, context, plaintext)
     encrypt_context = Melos::Vec.string_to_vec("MLS 1.0 " + label) + Melos::Vec.string_to_vec(context)
     pkey = suite.pkey.deserialize_public_encapsulation_key(public_key)

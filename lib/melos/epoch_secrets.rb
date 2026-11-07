@@ -29,6 +29,11 @@ class Melos::EpochSecrets
     end
   end
 
+  # whether the derived secret name can be had: it is held, or epoch_secret is there to derive it
+  def available?(name)
+    @derived.key?(name) || !@epoch_secret.nil?
+  end
+
   # derived: secrets known without an epoch_secret (see .from_init_secret and .from_components)
   # secret_tree_options: passed to Melos::SecretTree (max_forward_distance:, out_of_order_tolerance:);
   #                      every epoch made by #next inherits them

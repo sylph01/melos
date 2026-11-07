@@ -49,7 +49,29 @@ class Melos::Group
       raise Melos::ProtocolError.new("ReInit to version #{proposal.reinit.version}, lower than the group's") if proposal.reinit.version < Melos::Constants::Version::MLS10
       Melos::Struct::Extension.check_unique_types!(proposal.reinit.extensions, 'ReInit extensions')
     end
-    # ExternalInit must be absent (12.2); it is rejected as unsupported in apply_proposals
+    # ExternalInit must be absent (12.2); apply_proposals rejects it outside an external commit
+  end
+
+  # 12.2: an external commit's list is exactly one ExternalInit, at most one Remove, and PreSharedKeys
+  def validate_external_proposal_list!(proposals)
+    types = proposals.map { |proposal, _sender| proposal.proposal_type }
+    raise Melos::ProtocolError.new('an external commit must have exactly one ExternalInit') unless types.count(Melos::Constants::ProposalType::EXTERNAL_INIT) == 1
+    raise Melos::ProtocolError.new('an external commit may have at most one Remove') if types.count(Melos::Constants::ProposalType::REMOVE) > 1
+    allowed = [Melos::Constants::ProposalType::EXTERNAL_INIT, Melos::Constants::ProposalType::REMOVE, Melos::Constants::ProposalType::PSK]
+    others = types - allowed
+    raise Melos::ProtocolError.new("an external commit cannot carry #{others.map { Melos::Constants::ProposalType::NAMES[_1] || _1 }.join(', ')} proposals") unless others.empty?
+    psk_ids = proposals.filter_map { |proposal, _sender| proposal.psk.psk.raw if proposal.proposal_type == Melos::Constants::ProposalType::PSK }
+    raise Melos::ProtocolError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
+  end
+
+  # 12.2: in a resync external commit, the new leaf must be acceptable as an Update of the leaf it removes;
+  # here, that the application's member_matcher takes them for the same member
+  def validate_resync!(proposals, leaf_node)
+    remove = proposals.find { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::REMOVE }&.first
+    return if remove.nil?
+    removed_leaf = @ratchet_tree.leaf_node_at(remove.remove.removed)
+    return if removed_leaf && @member_matcher.call(removed_leaf, leaf_node)
+    raise Melos::ProtocolError.new('an external commit may only remove an earlier appearance of its committer')
   end
 
   # 11.2, 11.3, 12.4.3.1: a group joined with a reinit or branch resumption PSK (psk_id) is checked against
@@ -81,17 +103,19 @@ class Melos::Group
     end
   end
 
-  # 12.4.2, 7.6, 7.9.2: a received UpdatePath, checked against the tree after the proposals and before the merge
-  def validate_update_path!(tree, update_path, committer, joiners, extensions)
+  # 12.4.2, 7.6, 7.9.2: a received UpdatePath, checked against the tree after the proposals and before the merge.
+  #   new_leaf: the committer joined by this commit (12.4.3.2), so its leaf in tree is the path's own and replaces nothing
+  def validate_update_path!(tree, update_path, committer, joiners, extensions, new_leaf: false)
     leaf_node = update_path.leaf_node
     validate_leaf_node!(leaf_node, context: :commit, leaf_index: committer, tree: tree, extensions: extensions,
-                                   replacing: tree.leaf_node_at(committer), sending: false)
+                                   replacing: new_leaf ? nil : tree.leaf_node_at(committer), sending: false)
     # 7.9.2: the parent hash in the new leaf is the one this tree and path imply
     raise Melos::ProtocolError.new('UpdatePath leaf node parent hash does not verify') unless tree.verify_parent_hash_of_path(committer, update_path)
     # 12.4.2, 16.7: the path's public keys are new to the tree and distinct from each other
     path_keys = [leaf_node.encryption_key] + update_path.nodes.map(&:encryption_key)
     raise Melos::ProtocolError.new('UpdatePath public keys are not distinct') unless path_keys.uniq.size == path_keys.size
-    tree_keys = tree.nodes.compact.map(&:public_encryption_key)
+    # (the committer's own leaf is left out: 7.3 above already requires a new key, and a joiner's leaf is the path's)
+    tree_keys = tree.nodes.each_with_index.filter_map { |node, index| node&.public_encryption_key unless index == committer * 2 }
     raise Melos::ProtocolError.new('a public key in the UpdatePath already appears in the tree') unless (path_keys & tree_keys).empty?
     # 7.6: each node carries one ciphertext per member of its copath resolution, the new leaves excluded
     copath_nodes = tree.copath_nodes_of_filtered_direct_path(committer * 2)

@@ -224,7 +224,7 @@ default) and runs the 11.2, 11.3 and 12.4.3.1 checks; `Client#join_group` suppli
 PSKs of a group it replaces; groups keep `max_resumption_psks:` epochs (default 32, 8.6). Branch
 membership is checked against the old group's current tree. Tests in `test/test_resumption.rb`.
 
-## 11. External commits (L) — RFC 12.4.3.2, 8.3, 12.1.6
+## 11. External commits (L) — RFC 12.4.3.2, 8.3, 12.1.6 — done
 
 **RFC.** A member publishes a GroupInfo with an `external_pub` extension; a joiner builds a commit
 with `sender_type = new_member_commit`, an ExternalInit proposal carrying the HPKE `kem_output`,
@@ -246,6 +246,17 @@ Needs 2 and 3; shares the leaf-assignment code with Add.
 **Test.** Carol joins Alice and Bob by external commit; a resync commit replaces an old Carol; an
 external commit with a proposal by reference is rejected.
 
+**Done as.** `Group#group_info(external_pub:, include_ratchet_tree:)` (the group now keeps the
+epoch's confirmation tag, also persisted); `Crypto.external_key_pair`, `.external_init_sender`,
+`.external_init_receiver` (8.3, checked against the key-schedule vectors' `external_pub`).
+`Group.join_by_external_commit` builds a view of the epoch whose `EpochSecrets` holds only the
+external init secret, so `stage` advances it like any other; `Client#join_by_external_commit(group_info,
+remove:, psk_ids:)` merges and stores the new group. In `stage`, a `new_member_commit` sender gets the
+12.4.3.2 checks, the 12.2 external list rules (`#validate_external_proposal_list!`), the leftmost
+blank leaf (after a resync's Remove, which `#validate_resync!` limits to an earlier appearance by
+`member_matcher:`), the external init secret, and `validate_update_path!(new_leaf: true)`. Tests in
+`test/test_external_commits.rb`.
+
 ## 12. Interop testing (L)
 
 **RFC.** None; the mls-implementations repository defines a gRPC interop harness
@@ -265,5 +276,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10~~ → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11~~ → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

@@ -6,7 +6,7 @@ mapped to the code; updated as validation lands (last: tier 5). Status:
 - **done**: enforced today, with where.
 - **partial**: enforced in some paths or weaker than the RFC asks.
 - **missing**: not enforced.
-- **n/a**: for features melos does not implement yet (external commits); the code rejects these inputs with a clear error instead.
+- **n/a**: for features melos does not implement; none remain since external commits landed.
 
 Items marked *(application)* are MUSTs the RFC places on the application or the Authentication
 Service; melos should offer a hook or a documented default, not decide the policy.
@@ -15,7 +15,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 
 | # | Requirement | RFC | Status | Code |
 |---|---|---|---|---|
-| 1.1 | Verify the signature with the key selected by sender_type | 6.1 | partial | `Group#unprotect`, `#sender_signature_key`: member (leaf), external (external_senders entry), new_member_proposal (the Add's KeyPackage leaf); new_member_commit raises "not supported" |
+| 1.1 | Verify the signature with the key selected by sender_type | 6.1 | done | `Group#unprotect`, `#sender_signature_key`: member (leaf), external (external_senders entry), new_member_proposal (the Add's KeyPackage leaf), new_member_commit (the path's leaf) |
 | 1.2 | external sender: content_type MUST be proposal, proposal_type MUST be one allowed for external senders | 6.1, 12.1.8 | done | `#validate_non_member_content!` with `EXTERNAL_PROPOSAL_TYPES` |
 | 1.3 | new_member_commit: content_type MUST be commit; new_member_proposal: proposal of type add | 6.1 | done | `#validate_non_member_content!` |
 | 1.4 | PublicMessage: check membership_tag for member senders | 6.2 | done | `PublicMessage#unprotect` returns nil, `Group#unprotect` raises |
@@ -58,10 +58,10 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 3.7 | No two PreSharedKey proposals with the same PreSharedKeyID | 12.2 | done |
 | 3.8 | At most one GroupContextExtensions proposal | 12.2 | done |
 | 3.9 | ReInit MUST be alone in the list | 12.2 | done (`#create_commit` also leaves a pending ReInit out when other proposals are at hand, as 12.2 suggests) |
-| 3.10 | No ExternalInit in a regular commit | 12.2 | done by accident (`#apply_proposals` raises "unsupported") |
+| 3.10 | No ExternalInit in a regular commit | 12.2 | done (`#apply_proposals` unless `external:`) |
 | 3.11 | After applying, every leaf in the tree is valid per 7.3 | 12.2 | done: capabilities and key uniqueness of every remaining leaf (`#validate_members!`); signatures were verified when each leaf entered |
 | 3.12 | Reject the Commit if the list is invalid | 12.2 | follows from the above |
-| 3.13 | External commit list rules (exactly one ExternalInit, at most one Remove, PSKs only) | 12.2 | n/a |
+| 3.13 | External commit list rules (exactly one ExternalInit, at most one Remove, PSKs only; a Remove only of an earlier appearance of the joiner) | 12.2 | done (`#validate_external_proposal_list!`, `#validate_resync!` with the `member_matcher:` hook *(application)*); also 12.4.3.2: a path, no references, signed by the path leaf, PublicMessage |
 
 ## 4. KeyPackage validation (Sections 10, 10.1), when adding and when processing an Add
 
@@ -164,4 +164,4 @@ Service; melos should offer a hook or a documented default, not decide the polic
 3. ~~**KeyPackage and LeafNode validation**: sections 4 and 5 as one `LeafNode` validator parameterized by context (key_package / update / commit / tree), used by Add processing, commit path processing and join; includes signature, source, extension and capability checks, key uniqueness. Credential validation and maximum lifetime become hooks with defaults.~~ Done.
 4. ~~**Join integrity**: 7.8 to 7.12 and 7.14 on top of the validator from step 3.~~ Done.
 5. ~~**Client-level**: 7.5 group_id uniqueness, 7.1 KeyPackage suite check.~~ Done.
-6. **Later, with the features they belong to**: ~~external senders (1.2, 2.9)~~, ~~resumption PSK rules (2.6, 7.3), ReInit~~, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.
+6. **Later, with the features they belong to**: ~~external senders (1.2, 2.9)~~, ~~resumption PSK rules (2.6, 7.3), ReInit, external commits~~, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.

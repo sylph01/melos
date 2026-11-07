@@ -107,6 +107,28 @@ class Melos::Client
     resume(old_group, key_packages, Melos::Constants::ResumptionPSKUsage::BRANCH, group_id, extensions, options)
   end
 
+  # 12.4.3.2: join a group by external commit, from a GroupInfo with an external_pub extension (see
+  # Melos::Group#group_info). The new group is merged and stored right away; send the commit, and if the
+  # Delivery Service rejects it, drop the group (groups.delete(group.group_id)) and try again with a fresh GroupInfo.
+  #   remove: the leaf index of this client's earlier appearance in the group, to replace it (a "resync")
+  #   psk_ids: external PSKs (added with #add_external_psk) to inject
+  # Returns [group, commit MLSMessage].
+  def join_by_external_commit(group_info, ratchet_tree: nil, remove: nil, psk_ids: [], authenticated_data: '', **options)
+    bundle = Melos::KeyPackageBundle.generate(
+      @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
+    )
+    group, result = Melos::Group.join_by_external_commit(
+      @cipher_suite, group_info, signature_private_key: signature_private_key, leaf_node: bundle.key_package.leaf_node,
+      ratchet_tree: ratchet_tree, remove: remove, psk_ids: psk_ids, external_psks: @external_psks, authenticated_data: authenticated_data,
+      resumption_psk_lookup: method(:resumption_psk), **options
+    )
+    # a resync replaces this client's own earlier state of the group, which may still be here
+    ensure_group_id_free!(group.group_id) unless remove
+    group.merge_commit(result.staged)
+    store_group(group)
+    [group, result.commit]
+  end
+
   # 12.4.3.1: join the group a Welcome adds us to, using whichever of our KeyPackages it is addressed to.
   # That KeyPackage is then forgotten: its init key is single-use.
   #   resumed_groups: groups held elsewhere (by a client of another cipher suite, say) that a reinit or

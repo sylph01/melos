@@ -60,6 +60,10 @@ key_schedule_vectors.each do |key_schedule_vector|
       puts "[s] #{secret_name}"
     end
 
+    # 8.3: the external key pair comes from external_secret
+    assert_equal epoch['external_pub'], to_hex(Melos::Crypto.external_key_pair(suite, epoch_secrets.external_secret)[1])
+    puts "[s] external_pub"
+
     # Next Init Secret
     assert_equal epoch['init_secret'], to_hex(epoch_secrets.init_secret)
     puts "[s] init_secret"
