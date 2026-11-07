@@ -1,4 +1,5 @@
 require 'stringio'
+require_relative 'melos/errors'
 
 module Melos
   MLS_VERSION = 0x01 # mls10

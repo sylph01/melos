@@ -1,5 +1,5 @@
 # Validation of the pieces that enter a group: proposal lists (12.2), UpdatePaths (12.4.2),
-# KeyPackages (10.1) and LeafNodes (7.3). All methods raise ArgumentError on failure.
+# KeyPackages (10.1) and LeafNodes (7.3). All methods raise Melos::ProtocolError on failure.
 class Melos::Group
   # 7.2: the proposal and extension types every client implements; they are not listed in Capabilities
   DEFAULT_PROPOSAL_TYPES = (0x0001..0x0007).to_a.freeze
@@ -25,22 +25,22 @@ class Melos::Group
     psks    = of_type.(Melos::Constants::ProposalType::PSK)
     gces    = of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS)
 
-    raise ArgumentError.new('commit contains an Update from the committer') if updates.any? { |_proposal, sender| sender == committer }
+    raise Melos::ProtocolError.new('commit contains an Update from the committer') if updates.any? { |_proposal, sender| sender == committer }
     removed = removes.map { |proposal, _sender| proposal.remove.removed }
-    raise ArgumentError.new('commit removes its own sender') if removed.include?(committer)
+    raise Melos::ProtocolError.new('commit removes its own sender') if removed.include?(committer)
     touched = updates.map { |_proposal, sender| sender } + removed
     repeated = touched.tally.select { |_leaf, count| count > 1 }.keys
-    raise ArgumentError.new("more than one Update or Remove for leaf #{repeated.join(', ')}") unless repeated.empty?
+    raise Melos::ProtocolError.new("more than one Update or Remove for leaf #{repeated.join(', ')}") unless repeated.empty?
 
     added_keys = adds.map { |proposal, _sender| proposal.add.key_package.leaf_node.signature_key }
-    raise ArgumentError.new('more than one Add for the same client') unless added_keys.uniq.size == added_keys.size
+    raise Melos::ProtocolError.new('more than one Add for the same client') unless added_keys.uniq.size == added_keys.size
     staying_keys = []
     @ratchet_tree.each_leaf_node { |leaf_node, leaf_index| staying_keys << leaf_node.signature_key unless removed.include?(leaf_index) }
-    raise ArgumentError.new('Add for a client already in the group') unless (added_keys & staying_keys).empty?
+    raise Melos::ProtocolError.new('Add for a client already in the group') unless (added_keys & staying_keys).empty?
 
     psk_ids = psks.map { |proposal, _sender| proposal.psk.psk.raw }
-    raise ArgumentError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
-    raise ArgumentError.new('more than one GroupContextExtensions proposal') if gces.size > 1
+    raise Melos::ProtocolError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
+    raise Melos::ProtocolError.new('more than one GroupContextExtensions proposal') if gces.size > 1
     # ReInit must be alone and ExternalInit must be absent (12.2); both are rejected as unsupported in apply_proposals
   end
 
@@ -50,20 +50,20 @@ class Melos::Group
     validate_leaf_node!(leaf_node, context: :commit, leaf_index: committer, tree: tree, extensions: extensions,
                                    replacing: tree.leaf_node_at(committer), sending: false)
     # 7.9.2: the parent hash in the new leaf is the one this tree and path imply
-    raise ArgumentError.new('UpdatePath leaf node parent hash does not verify') unless tree.verify_parent_hash_of_path(committer, update_path)
+    raise Melos::ProtocolError.new('UpdatePath leaf node parent hash does not verify') unless tree.verify_parent_hash_of_path(committer, update_path)
     # 12.4.2, 16.7: the path's public keys are new to the tree and distinct from each other
     path_keys = [leaf_node.encryption_key] + update_path.nodes.map(&:encryption_key)
-    raise ArgumentError.new('UpdatePath public keys are not distinct') unless path_keys.uniq.size == path_keys.size
+    raise Melos::ProtocolError.new('UpdatePath public keys are not distinct') unless path_keys.uniq.size == path_keys.size
     tree_keys = tree.nodes.compact.map(&:public_encryption_key)
-    raise ArgumentError.new('a public key in the UpdatePath already appears in the tree') unless (path_keys & tree_keys).empty?
+    raise Melos::ProtocolError.new('a public key in the UpdatePath already appears in the tree') unless (path_keys & tree_keys).empty?
     # 7.6: each node carries one ciphertext per member of its copath resolution, the new leaves excluded
     copath_nodes = tree.copath_nodes_of_filtered_direct_path(committer * 2)
-    raise ArgumentError.new('malformed update path') unless copath_nodes.count == update_path.nodes.count
+    raise Melos::ProtocolError.new('malformed update path') unless copath_nodes.count == update_path.nodes.count
     excluded = joiners.map { _1.leaf_index * 2 }
     update_path.nodes.each_with_index do |node, i|
       expected = (tree.resolution(copath_nodes[i]) - excluded).count
       next if node.encrypted_path_secret.count == expected
-      raise ArgumentError.new("UpdatePath node #{i} has #{node.encrypted_path_secret.count} ciphertexts, expected #{expected}")
+      raise Melos::ProtocolError.new("UpdatePath node #{i} has #{node.encrypted_path_secret.count} ciphertexts, expected #{expected}")
     end
   end
 
@@ -71,15 +71,15 @@ class Melos::Group
   # 10.1: a KeyPackage being added, in the tree it is (or will be) added to.
   #   leaf_index: where it sits in tree, or nil if it is not in tree yet
   def validate_key_package!(key_package, tree:, leaf_index:, extensions:, sending:)
-    raise ArgumentError.new("KeyPackage has version #{key_package.version}") unless key_package.version == Melos::Constants::Version::MLS10
-    raise ArgumentError.new("KeyPackage is for cipher suite #{key_package.cipher_suite}") unless key_package.cipher_suite == @suite.suite_id
+    raise Melos::ProtocolError.new("KeyPackage has version #{key_package.version}") unless key_package.version == Melos::Constants::Version::MLS10
+    raise Melos::ProtocolError.new("KeyPackage is for cipher suite #{key_package.cipher_suite}") unless key_package.cipher_suite == @suite.suite_id
     Melos::Struct::Extension.check_unique_types!(key_package.extensions, 'KeyPackage extensions')
     validate_leaf_node!(key_package.leaf_node, context: :key_package, leaf_index: leaf_index, tree: tree, extensions: extensions, sending: sending)
-    raise ArgumentError.new('KeyPackage signature does not verify') unless key_package.verify
-    raise ArgumentError.new('KeyPackage init_key equals its leaf encryption_key') if key_package.init_key == key_package.leaf_node.encryption_key
+    raise Melos::ProtocolError.new('KeyPackage signature does not verify') unless key_package.verify
+    raise Melos::ProtocolError.new('KeyPackage init_key equals its leaf encryption_key') if key_package.init_key == key_package.leaf_node.encryption_key
     # 10: extensions of the KeyPackage itself must also be in the leaf's capabilities
     unsupported = key_package.extensions.map(&:extension_type) - DEFAULT_EXTENSION_TYPES - key_package.leaf_node.capabilities.export.extensions
-    raise ArgumentError.new("KeyPackage extensions not in its capabilities: #{unsupported.map { '0x%04x' % _1 }.join(', ')}") unless unsupported.empty?
+    raise Melos::ProtocolError.new("KeyPackage extensions not in its capabilities: #{unsupported.map { '0x%04x' % _1 }.join(', ')}") unless unsupported.empty?
   end
 
   # 7.3: a LeafNode in one of its contexts.
@@ -93,11 +93,11 @@ class Melos::Group
     expected_source = { key_package: Melos::Constants::LeafNodeSource::KEY_PACKAGE, update: Melos::Constants::LeafNodeSource::UPDATE,
                         commit: Melos::Constants::LeafNodeSource::COMMIT }[context]
     if expected_source && leaf_node.leaf_node_source != expected_source
-      raise ArgumentError.new("leaf node source is #{leaf_node.leaf_node_source}, expected #{expected_source} for #{context}")
+      raise Melos::ProtocolError.new("leaf node source is #{leaf_node.leaf_node_source}, expected #{expected_source} for #{context}")
     end
 
     # 5.3.1: the credential, by the application
-    raise ArgumentError.new('leaf node credential rejected') unless @credential_validator.call(leaf_node.credential, leaf_node)
+    raise Melos::ProtocolError.new('leaf node credential rejected') unless @credential_validator.call(leaf_node.credential, leaf_node)
 
     # the signature; update and commit leaves are bound to this group and leaf index
     verified = if leaf_node.leaf_node_source == Melos::Constants::LeafNodeSource::KEY_PACKAGE
@@ -106,30 +106,30 @@ class Melos::Group
                  raise ArgumentError.new('leaf index needed to verify this leaf node') if leaf_index.nil?
                  leaf_node.verify(@suite, @group_id, leaf_index)
                end
-    raise ArgumentError.new('leaf node signature does not verify') unless verified
+    raise Melos::ProtocolError.new('leaf node signature does not verify') unless verified
 
     # 7.3, 11: compatible with the group's version, cipher suite, extensions and required capabilities
     capabilities = leaf_node.capabilities.export
-    raise ArgumentError.new('leaf node does not support MLS 1.0') unless capabilities.versions.include?(Melos::Constants::Version::MLS10)
-    raise ArgumentError.new("leaf node does not support cipher suite #{@suite.suite_id}") unless capabilities.cipher_suites.include?(@suite.suite_id)
+    raise Melos::ProtocolError.new('leaf node does not support MLS 1.0') unless capabilities.versions.include?(Melos::Constants::Version::MLS10)
+    raise Melos::ProtocolError.new("leaf node does not support cipher suite #{@suite.suite_id}") unless capabilities.cipher_suites.include?(@suite.suite_id)
     others = []
     tree.each_leaf_node { |other, index| others << other unless index == leaf_index }
     validate_capabilities!(leaf_node, capabilities, extensions, others.map { _1.credential.credential_type })
     # 7.3, 13.3: the other members support this leaf's credential type
     others.each do |other|
       next if other.capabilities.export.credentials.include?(leaf_node.credential.credential_type)
-      raise ArgumentError.new('a current member does not support this leaf node\'s credential type')
+      raise Melos::ProtocolError.new('a current member does not support this leaf node\'s credential type')
     end
 
     # 7.2, 7.3: lifetime, for leaves that came from a KeyPackage
     if leaf_node.leaf_node_source == Melos::Constants::LeafNodeSource::KEY_PACKAGE
       lifetime = leaf_node.lifetime
       if @max_leaf_node_lifetime && lifetime.not_after - lifetime.not_before > @max_leaf_node_lifetime
-        raise ArgumentError.new('leaf node lifetime is longer than allowed')
+        raise Melos::ProtocolError.new('leaf node lifetime is longer than allowed')
       end
       if sending
         now = Time.now.to_i
-        raise ArgumentError.new('leaf node lifetime does not cover the current time') unless lifetime.not_before <= now && now <= lifetime.not_after
+        raise Melos::ProtocolError.new('leaf node lifetime does not cover the current time') unless lifetime.not_before <= now && now <= lifetime.not_after
       end
     end
 
@@ -137,12 +137,12 @@ class Melos::Group
 
     # 7.3, 12.4.2: a replacement leaf brings a new encryption key
     if replacing && leaf_node.encryption_key == replacing.encryption_key
-      raise ArgumentError.new('replacement leaf node reuses the encryption key of the leaf it replaces')
+      raise Melos::ProtocolError.new('replacement leaf node reuses the encryption key of the leaf it replaces')
     end
     # 7.3, 16.7: keys are unique among members
     others.each do |other|
-      raise ArgumentError.new('leaf node signature key is already used by another member') if other.signature_key == leaf_node.signature_key
-      raise ArgumentError.new('leaf node encryption key is already used by another member') if other.encryption_key == leaf_node.encryption_key
+      raise Melos::ProtocolError.new('leaf node signature key is already used by another member') if other.signature_key == leaf_node.signature_key
+      raise Melos::ProtocolError.new('leaf node encryption key is already used by another member') if other.encryption_key == leaf_node.encryption_key
     end
   end
 
@@ -151,24 +151,24 @@ class Melos::Group
   def validate_capabilities!(leaf_node, capabilities, extensions, credential_types_in_use)
     own_extension_types = leaf_node.extensions.map(&:extension_type) - DEFAULT_EXTENSION_TYPES
     missing = own_extension_types - capabilities.extensions
-    raise ArgumentError.new("leaf node extensions not in its capabilities: #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
-    raise ArgumentError.new('leaf node credential type not in its capabilities') unless capabilities.credentials.include?(leaf_node.credential.credential_type)
+    raise Melos::ProtocolError.new("leaf node extensions not in its capabilities: #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
+    raise Melos::ProtocolError.new('leaf node credential type not in its capabilities') unless capabilities.credentials.include?(leaf_node.credential.credential_type)
 
     group_extension_types = extensions.map(&:extension_type) - DEFAULT_EXTENSION_TYPES
     missing = group_extension_types - capabilities.extensions
-    raise ArgumentError.new("leaf node does not support GroupContext extensions #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
+    raise Melos::ProtocolError.new("leaf node does not support GroupContext extensions #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
 
     if (required = required_capabilities(extensions))
       missing = (required.extension_types - DEFAULT_EXTENSION_TYPES) - capabilities.extensions
-      raise ArgumentError.new("leaf node lacks required extensions #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
+      raise Melos::ProtocolError.new("leaf node lacks required extensions #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
       missing = (required.proposal_types - DEFAULT_PROPOSAL_TYPES) - capabilities.proposals
-      raise ArgumentError.new("leaf node lacks required proposal types #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
+      raise Melos::ProtocolError.new("leaf node lacks required proposal types #{missing.map { '0x%04x' % _1 }.join(', ')}") unless missing.empty?
       missing = required.credential_types - capabilities.credentials
-      raise ArgumentError.new("leaf node lacks required credential types #{missing.join(', ')}") unless missing.empty?
+      raise Melos::ProtocolError.new("leaf node lacks required credential types #{missing.join(', ')}") unless missing.empty?
     end
 
     missing = credential_types_in_use.uniq - capabilities.credentials
-    raise ArgumentError.new("leaf node does not support credential types in use: #{missing.join(', ')}") unless missing.empty?
+    raise Melos::ProtocolError.new("leaf node does not support credential types in use: #{missing.join(', ')}") unless missing.empty?
   end
 
   # 12.2, 12.1.7: after a proposal list is applied, every remaining member is compatible with the (possibly
@@ -178,9 +178,9 @@ class Melos::Group
     leaves = []
     tree.each_leaf_node { |leaf_node, _index| leaves << leaf_node }
     signature_keys = leaves.map(&:signature_key)
-    raise ArgumentError.new('two members share a signature key') unless signature_keys.uniq.size == signature_keys.size
+    raise Melos::ProtocolError.new('two members share a signature key') unless signature_keys.uniq.size == signature_keys.size
     encryption_keys = leaves.map(&:encryption_key)
-    raise ArgumentError.new('two members share an encryption key') unless encryption_keys.uniq.size == encryption_keys.size
+    raise Melos::ProtocolError.new('two members share an encryption key') unless encryption_keys.uniq.size == encryption_keys.size
     credential_types = leaves.map { _1.credential.credential_type }
     leaves.each do |leaf_node|
       validate_capabilities!(leaf_node, leaf_node.capabilities.export, extensions, credential_types)
@@ -191,13 +191,13 @@ class Melos::Group
   def validate_joined_state!
     validate_tree!(@ratchet_tree, @extensions)
     # the private keys derived from the Welcome's path secret must be the ones for the public keys in the tree
-    raise ArgumentError.new('derived private keys do not match the ratchet tree') unless @private_tree.consistent?(@ratchet_tree)
+    raise Melos::ProtocolError.new('derived private keys do not match the ratchet tree') unless @private_tree.consistent?(@ratchet_tree)
   end
 
   # 12.4.3.1, 7.9.2, 7.3: the integrity of a ratchet tree received from someone else.
   # Also what makes 13.4 hold for us: validate_leaf_node! on our own leaf checks that we support every GroupContext extension.
   def validate_tree!(tree, extensions)
-    raise ArgumentError.new('ratchet tree has a parent node that is not parent-hash valid') unless tree.parent_hash_valid?
+    raise Melos::ProtocolError.new('ratchet tree has a parent node that is not parent-hash valid') unless tree.parent_hash_valid?
     tree.each_leaf_node do |leaf_node, leaf_index|
       validate_leaf_node!(leaf_node, context: :tree, leaf_index: leaf_index, tree: tree, extensions: extensions)
     end
@@ -209,19 +209,19 @@ class Melos::Group
       parent_node = node.parent_node
       encryption_keys << parent_node.encryption_key
       parent_node.unmerged_leaves.each do |leaf_index|
-        raise ArgumentError.new("unmerged leaf #{leaf_index} is blank") if tree.leaf_node_at(leaf_index).nil?
+        raise Melos::ProtocolError.new("unmerged leaf #{leaf_index} is blank") if tree.leaf_node_at(leaf_index).nil?
         direct_path = Melos::Tree.direct_path(leaf_index * 2, tree.n_leaves)
-        raise ArgumentError.new("unmerged leaf #{leaf_index} is not under node #{node_index}") unless direct_path.include?(node_index)
+        raise Melos::ProtocolError.new("unmerged leaf #{leaf_index} is not under node #{node_index}") unless direct_path.include?(node_index)
         # every non-blank node between the leaf and this node lists the leaf as unmerged too
         direct_path.take_while { _1 != node_index }.each do |between|
           next if tree[between].nil?
           next if tree[between].parent_node.unmerged_leaves.include?(leaf_index)
-          raise ArgumentError.new("unmerged leaf #{leaf_index} of node #{node_index} is merged at node #{between} below it")
+          raise Melos::ProtocolError.new("unmerged leaf #{leaf_index} of node #{node_index} is merged at node #{between} below it")
         end
       end
     end
     # 12.4.3.1, 16.7: no encryption key appears in two nodes
-    raise ArgumentError.new('an encryption key appears in more than one node of the ratchet tree') unless encryption_keys.uniq.size == encryption_keys.size
+    raise Melos::ProtocolError.new('an encryption key appears in more than one node of the ratchet tree') unless encryption_keys.uniq.size == encryption_keys.size
   end
 
   # 11.1: the required_capabilities extension of a GroupContext, decoded, or nil.

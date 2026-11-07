@@ -139,7 +139,7 @@ class Melos::Struct::Extension < Melos::Struct::Base
   def self.check_unique_types!(extensions, where)
     duplicates = extensions.map(&:extension_type).tally.select { |_type, count| count > 1 }.keys
     return if duplicates.empty?
-    raise ArgumentError.new("#{where} has more than one extension of type #{duplicates.map { '0x%04x' % _1 }.join(', ')}")
+    raise Melos::ProtocolError.new("#{where} has more than one extension of type #{duplicates.map { '0x%04x' % _1 }.join(', ')}")
   end
 end
 
@@ -963,7 +963,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
     pmc = Melos::Struct::PrivateMessageContent.new(stream, content_type: content_type)
     # 6.3.1: the padding MUST be all zero bytes, otherwise the message is malformed
-    raise ArgumentError.new('PrivateMessage padding is not all zero') unless pmc.padding_zero?
+    raise Melos::ProtocolError.new('PrivateMessage padding is not all zero') unless pmc.padding_zero?
 
     fc = Melos::Struct::FramedContent.create(
       group_id: group_id,

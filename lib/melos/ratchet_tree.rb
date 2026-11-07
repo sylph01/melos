@@ -37,7 +37,7 @@ class Melos::RatchetTree
       presence = data_stream.read(1).unpack1('C')
       nodes << (presence == 1 ? Melos::Struct::Node.new(data_stream) : nil)
     end
-    raise ArgumentError.new('last node of ratchet_tree must not be blank') if !nodes.empty? && nodes.last.nil?
+    raise Melos::ProtocolError.new('last node of ratchet_tree must not be blank') if !nodes.empty? && nodes.last.nil?
     new(suite, nodes)
   end
 
@@ -250,7 +250,7 @@ class Melos::RatchetTree
   def merge_update_path(leaf_index, update_path)
     node_index = leaf_index * 2
     fdp = filtered_direct_path(node_index)
-    raise ArgumentError.new('malformed update path') unless fdp.count == update_path.nodes.count
+    raise Melos::ProtocolError.new('malformed update path') unless fdp.count == update_path.nodes.count
     parent_hashes = calculate_parent_hashes(leaf_index, update_path.nodes)
     fdp.each_with_index do |fdp_node_index, i|
       parent_node = Melos::Struct::ParentNode.create(
@@ -342,16 +342,16 @@ class Melos::RatchetTree
   # Returns the decrypted path secret, for #calculate_commit_secret.
   def decrypt_path_secret(private_tree, update_path, sender_leaf_index, receiver_leaf_index, group_context, leaves_to_remove = [])
     fdp = filtered_direct_path(sender_leaf_index * 2)
-    raise ArgumentError.new('malformed update path') unless fdp.count == update_path.nodes.count
+    raise Melos::ProtocolError.new('malformed update path') unless fdp.count == update_path.nodes.count
     overlap_node_index = Melos::Tree.overlap_with_filtered_direct_path(receiver_leaf_index * 2, fdp, n_leaves)
     overlap_index = fdp.index(overlap_node_index)
     copath_node_index = copath_nodes_of_filtered_direct_path(sender_leaf_index * 2)[overlap_index]
     resolution = resolution(copath_node_index) - leaves_to_remove.map { _1 * 2 } # leaf index -> node index
     update_path_node = update_path.nodes[overlap_index]
-    raise ArgumentError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless update_path_node.encrypted_path_secret.count == resolution.count
+    raise Melos::ProtocolError.new('# of resolution of copath node does not match with # of encrypted path secrets') unless update_path_node.encrypted_path_secret.count == resolution.count
 
     priv_index = resolution.rindex { private_tree[_1] }
-    raise ArgumentError.new("priv key not found in tree (sender leaf index: #{sender_leaf_index})") if priv_index.nil?
+    raise Melos::ProtocolError.new("priv key not found in tree (sender leaf index: #{sender_leaf_index})") if priv_index.nil?
     encrypted_path_secret = update_path_node.encrypted_path_secret[priv_index]
     path_secret = Melos::Crypto.decrypt_with_label(
       @suite, private_tree[resolution[priv_index]], "UpdatePathNode", group_context.raw,
@@ -365,7 +365,7 @@ class Melos::RatchetTree
   # 7.4: the commit secret is the path secret one derivation past the last node of the sender's filtered direct path
   def calculate_commit_secret(update_path, sender_leaf_index, receiver_leaf_index, path_secret)
     fdp = filtered_direct_path(sender_leaf_index * 2)
-    raise ArgumentError.new('malformed update path') unless fdp.count == update_path.nodes.count
+    raise Melos::ProtocolError.new('malformed update path') unless fdp.count == update_path.nodes.count
     overlap_node_index = Melos::Tree.overlap_with_filtered_direct_path(receiver_leaf_index * 2, fdp, n_leaves)
     secret = path_secret
     (fdp.count - 1 - fdp.index(overlap_node_index)).times do

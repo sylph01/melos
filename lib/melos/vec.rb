@@ -2,7 +2,7 @@ module Melos::Vec
   extend self
 
   def read_varint(data)
-    raise ArgumentError.new('variable-length vector is truncated') if data.nil? || data.empty?
+    raise Melos::ProtocolError.new('variable-length vector is truncated') if data.nil? || data.empty?
     byte = 0
     v = data[byte].ord
     prefix = v >> 6
@@ -11,7 +11,7 @@ module Melos::Vec
     v = v & 0x3f
     (length - 1).times do
       byte += 1
-      raise ArgumentError.new('variable-length vector is truncated') if data[byte].nil?
+      raise Melos::ProtocolError.new('variable-length vector is truncated') if data[byte].nil?
       v = (v << 8) + data[byte].ord
     end
 
@@ -46,14 +46,14 @@ module Melos::Vec
   # sig { params(stream: StringIO).returns(String) }
   def parse_stream(stream)
     prefix = prefix_from_stream(stream)
-    raise ArgumentError.new('invalid header') unless (0..2).include?(prefix) # 2.1.2: prefix 3 is invalid
+    raise Melos::ProtocolError.new('invalid header') unless (0..2).include?(prefix) # 2.1.2: prefix 3 is invalid
     header_length = 2 ** prefix
     length = length_from_stream(stream)
     # 2.1.2: the length MUST be encoded in the minimum number of bytes; a longer encoding is rejected
-    raise ArgumentError.new('variable-length header is not minimal') unless write_varint(length).bytesize == header_length
+    raise Melos::ProtocolError.new('variable-length header is not minimal') unless write_varint(length).bytesize == header_length
     stream.pos += header_length
     str = stream.read(length) || ''
-    raise ArgumentError.new('variable-length vector is truncated') if str.bytesize < length
+    raise Melos::ProtocolError.new('variable-length vector is truncated') if str.bytesize < length
     str
   end
 
@@ -62,7 +62,7 @@ module Melos::Vec
   def prefix_from_stream(stringio)
     pos = stringio.pos
     first = stringio.getbyte
-    raise ArgumentError.new('variable-length vector is truncated') if first.nil?
+    raise Melos::ProtocolError.new('variable-length vector is truncated') if first.nil?
     prefix_ = first >> 6
     stringio.seek(pos)
     prefix_

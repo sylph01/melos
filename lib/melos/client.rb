@@ -61,7 +61,7 @@ class Melos::Client
     welcome_struct = welcome.is_a?(Melos::Struct::MLSMessage) ? welcome.welcome : welcome
     raise ArgumentError.new('not a Welcome message') if welcome_struct.nil?
     bundle = welcome_struct.secrets.map(&:new_member).filter_map { @key_packages[_1] }.first
-    raise ArgumentError.new('Welcome is not addressed to any KeyPackage of this client') if bundle.nil?
+    raise Melos::ProtocolError.new('Welcome is not addressed to any KeyPackage of this client') if bundle.nil?
     group = Melos::Group.from_welcome(
       @cipher_suite, welcome,
       key_package: bundle.key_package, init_private_key: bundle.init_private_key,
@@ -80,6 +80,6 @@ class Melos::Client
   def ensure_group_id_free!(group_id)
     existing = @groups[group_id]
     return if existing.nil? || !existing.active?
-    raise ArgumentError.new('this client is already in a group with this group_id')
+    raise Melos::StateError.new('this client is already in a group with this group_id')
   end
 end

@@ -32,7 +32,7 @@ class Melos::SecretTree
     # TODO (9.1): keep a window of unconsumed generations so that out-of-order messages can be decrypted
     def ratchet_until(generation)
       if generation < @next_generation - 1
-        raise ArgumentError.new("generation #{generation} has already been consumed (next generation is #{@next_generation})")
+        raise Melos::StateError.new("generation #{generation} has already been consumed (next generation is #{@next_generation})")
       end
       ratchet while @next_generation <= generation
       @current
@@ -87,6 +87,6 @@ class Melos::SecretTree
                else
                  raise ArgumentError.new("unknown content type #{content_type}")
                end
-    ratchets[leaf_index] or raise ArgumentError.new("no leaf #{leaf_index} in secret tree with #{@n_leaves} leaves")
+    ratchets[leaf_index] or raise Melos::ProtocolError.new("no leaf #{leaf_index} in secret tree with #{@n_leaves} leaves")
   end
 end
