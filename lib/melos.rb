@@ -1,3 +1,5 @@
+require 'stringio'
+
 module Melos
   MLS_VERSION = 0x01 # mls10
 end
