@@ -69,7 +69,7 @@ commit without it (its path replaces the leaf anyway).
 **Test.** Bob proposes an Update, Alice commits it, both agree; Bob's private tree is consistent
 and he can still decrypt the next commit. Two pending Updates from Bob: the committer applies one.
 
-## 5. Deletion schedule (M) — RFC 9.2, 7.5
+## 5. Deletion schedule (M) — RFC 9.2, 7.5 — done
 
 **RFC.** Consumed secrets MUST be deleted immediately: `commit_secret`, `joiner_secret`,
 `epoch_secret`, `encryption_secret` of the epoch and `init_secret` of the previous one, the secret
@@ -229,5 +229,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4~~ → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5~~ → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

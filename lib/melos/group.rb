@@ -98,7 +98,7 @@ class Melos::Group
       suite: suite, group_id: group_id, epoch: 0, leaf_index: 0, signature_private_key: signature_private_key,
       ratchet_tree: ratchet_tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: '', interim_transcript_hash: interim_transcript_hash(suite, '', confirmation_tag),
-      epoch_secrets: epoch_secrets, external_psks: external_psks, **options
+      epoch_secrets: epoch_secrets.discard_consumed!, external_psks: external_psks, **options
     )
   end
 
@@ -185,6 +185,7 @@ class Melos::Group
       epoch_secrets: epoch_secrets, external_psks: external_psks, **options
     )
     group.send(:validate_joined_state!)
+    epoch_secrets.discard_consumed! # 9.2: the joiner secret has done its work
     group
   end
 
@@ -281,6 +282,11 @@ class Melos::Group
     @interim_transcript_hash = staged.interim_transcript_hash
     @epoch_secrets = staged.epoch_secrets
     @epoch += 1
+    # 9.2, 7.5: the previous epoch's secrets go with the previous EpochSecrets; the new epoch keeps only
+    # what it still needs, and the private tree keeps only keys for nodes that still carry them
+    @epoch_secrets.discard_consumed!
+    @private_tree.prune!(@ratchet_tree)
+    staged.path_secrets = nil
     @group_context = nil
     @pending_proposals = {}
     @pending_updates = {}
@@ -406,11 +412,13 @@ class Melos::Group
     staged = stage(authenticated_content, own_path: own_path)
     authenticated_content.auth.confirmation_tag = staged.confirmation_tag
 
-    CommitResult.new(
+    result = CommitResult.new(
       commit: protect_authenticated_content(authenticated_content, padding_size: padding_size),
       welcome: staged.joiners.empty? ? nil : create_welcome(staged, include_ratchet_tree: include_ratchet_tree),
       staged: staged
     )
+    staged.path_secrets = nil # 9.2: used for the Welcome, not needed again
+    result
   end
 
   # 12.4.3.1: the Welcome for the members a staged commit adds

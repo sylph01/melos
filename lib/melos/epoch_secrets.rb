@@ -100,6 +100,21 @@ class Melos::EpochSecrets
     Melos::Crypto.expand_with_label(@suite, Melos::Crypto.derive_secret(@suite, exporter_secret, label), "exported", Melos::Crypto.hash(@suite, context), length)
   end
 
+  # 9.2: once this epoch is the current one, the secrets that produced it have been consumed. Derive
+  # everything the epoch still needs (the Table 4 secrets and the secret tree), then drop epoch_secret,
+  # joiner_secret, psk_secret and encryption_secret. init_secret stays until the next epoch exists.
+  # Ruby cannot zeroize strings; this drops the references so they can be collected.
+  def discard_consumed!
+    return self if @epoch_secret.nil?
+    DERIVED_SECRETS.each_key { send(_1) }
+    secret_tree
+    @derived.delete(:encryption_secret)
+    @epoch_secret = nil
+    @joiner_secret = nil
+    @psk_secret = nil
+    self
+  end
+
   # 9: this epoch's secret tree, built on first use
   def secret_tree
     raise ArgumentError.new('n_leaves is needed to build the secret tree') if @n_leaves.nil?

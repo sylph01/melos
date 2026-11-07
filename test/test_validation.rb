@@ -266,6 +266,12 @@ alice_group.process_message(wire(result.commit))
 bob_group.merge_commit(result.staged)
 assert_equal alice_group.epoch_authenticator, bob_group.epoch_authenticator
 
+## 9.2 a message key is handed out once: the same PrivateMessage cannot be decrypted twice
+message = alice_group.create_application_message("once")
+assert_equal "once", bob_group.process_message(wire(message)).content.application_data
+assert_raises(Melos::StateError) { bob_group.process_message(wire(message)) }
+puts "[pass] a replayed application message is refused"
+
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
 bob_group.process_message(wire(result.commit))

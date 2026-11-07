@@ -67,6 +67,17 @@ suite_ids.each do |suite_id|
   assert_equal true, alice_group.private_tree.consistent?(alice_group.ratchet_tree)
   puts "[pass] Alice adds Bob and Bob joins from the Welcome"
 
+  ## 9.2: once an epoch is current, the secrets that produced it are gone; what the epoch needs remains
+  [alice_group, bob_group].each do |group|
+    assert_nil group.epoch_secrets.epoch_secret
+    assert_nil group.epoch_secrets.joiner_secret
+    assert_nil group.epoch_secrets.psk_secret
+    refute_nil group.epoch_secrets.membership_key
+    refute_nil group.epoch_secrets.init_secret
+    assert_nil result.staged.path_secrets
+  end
+  puts "[pass] Consumed secrets are dropped once the epoch is current"
+
   ## Exported secrets agree between members and depend on label, context and length
   exported = alice_group.export_secret("app", "ctx", 32)
   assert_equal exported, bob_group.export_secret("app", "ctx", 32)
@@ -196,6 +207,9 @@ suite_ids.each do |suite_id|
   assert_same_epoch(alice_group, bob_group)
   assert_equal 2, alice_group.ratchet_tree.n_leaves
   assert_nil alice_group.ratchet_tree.leaf_node_at(2)
+  # 9.2: Bob's private tree holds exactly the keys for his leaf and the (fresh) root, nothing from the old nodes
+  assert_equal [1, 2], bob_group.private_tree.node_indexes
+  assert_equal true, bob_group.private_tree.consistent?(bob_group.ratchet_tree)
   puts "[pass] Alice removes Carol and the tree shrinks back to two leaves"
 
   ## Carol processes the commit that removed her: she sees it, and can no longer send

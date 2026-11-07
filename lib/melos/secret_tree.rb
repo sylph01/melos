@@ -6,8 +6,8 @@ require_relative 'constants'
 # encryption_secret, with the same shape as the ratchet tree. Only the two hash ratchets
 # at each leaf are kept; the node secrets above them are discarded once derived.
 class Melos::SecretTree
-  # 9.1: a hash ratchet over one leaf's secret. Each generation yields a key and nonce
-  # and steps the secret forward; older secrets are forgotten.
+  # 9.1: a hash ratchet over one leaf's secret. Each generation yields a key and nonce once and
+  # steps the secret forward; per 9.2 neither the secret nor the key is kept once handed out.
   class Ratchet
     attr_reader :next_generation
 
@@ -15,7 +15,6 @@ class Melos::SecretTree
       @suite = suite
       @secret = secret
       @next_generation = 0
-      @current = nil # [key, nonce, generation] of the last generation derived
     end
 
     # derive the key and nonce of the current generation and step the ratchet
@@ -25,17 +24,18 @@ class Melos::SecretTree
       key   = Melos::Crypto.derive_tree_secret(@suite, @secret, "key",   generation, @suite.hpke.n_k)
       @secret = Melos::Crypto.derive_tree_secret(@suite, @secret, "secret", generation, @suite.kdf.n_h)
       @next_generation += 1
-      @current = [key, nonce, generation]
+      [key, nonce, generation]
     end
 
-    # the key and nonce of the given generation, ratcheting forward as needed.
-    # TODO (9.1): keep a window of unconsumed generations so that out-of-order messages can be decrypted
+    # the key and nonce of the given generation, ratcheting forward as needed. A generation already
+    # handed out cannot be derived again: its secret is gone.
+    # TODO (9.1, 15.3): keep a bounded window of skipped generations so that out-of-order messages can be decrypted
     def ratchet_until(generation)
-      if generation < @next_generation - 1
+      if generation < @next_generation
         raise Melos::StateError.new("generation #{generation} has already been consumed (next generation is #{@next_generation})")
       end
-      ratchet while @next_generation <= generation
-      @current
+      ratchet while @next_generation < generation
+      ratchet
     end
   end
 

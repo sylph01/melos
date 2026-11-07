@@ -41,11 +41,21 @@ class Melos::PrivateTree
     end
   end
 
+  # 9.2, 7.5: drop every private key whose node is now blank, gone, or carries a different public key
+  def prune!(ratchet_tree)
+    @keys.select! { |node_index, private_key| matches_node?(ratchet_tree, node_index, private_key) }
+    self
+  end
+
   # every private key here belongs to a non-blank node of ratchet_tree whose public key it matches
   def consistent?(ratchet_tree)
-    @keys.all? do |node_index, private_key|
-      node = ratchet_tree[node_index]
-      !node.nil? && Melos::Crypto.encapsulation_key_pair_corresponds?(ratchet_tree.suite, private_key, node.public_encryption_key)
-    end
+    @keys.all? { |node_index, private_key| matches_node?(ratchet_tree, node_index, private_key) }
+  end
+
+  private
+
+  def matches_node?(ratchet_tree, node_index, private_key)
+    node = ratchet_tree[node_index]
+    !node.nil? && Melos::Crypto.encapsulation_key_pair_corresponds?(ratchet_tree.suite, private_key, node.public_encryption_key)
   end
 end
