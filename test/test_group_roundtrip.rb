@@ -126,6 +126,43 @@ suite_ids.each do |suite_id|
   end
   puts "[pass] Alice's application message decrypts for Bob and Carol"
 
+  ## 9.1: application messages that arrive out of order still decrypt, each once
+  first = alice_group.create_application_message("first")
+  second = alice_group.create_application_message("second")
+  assert_equal "second", deliver(bob_group, second).content.application_data
+  assert_equal "first", deliver(bob_group, first).content.application_data
+  assert_raises(Melos::StateError) { deliver(bob_group, first) }
+  [first, second].each { deliver(carol_group, _1) }
+  puts "[pass] Application messages delivered in reverse order decrypt"
+
+  ## 15.3: an application message of the previous epoch decrypts after a commit; a proposal does not
+  late = carol_group.create_application_message("sent before the commit")
+  stale_update = carol_group.create_update_proposal
+  carol_group.instance_variable_get(:@pending_proposals).clear # Carol drops her Update; nobody else saw it
+  epoch_before = alice_group.epoch
+  result = alice_group.create_commit
+  [bob_group, carol_group].each { deliver(_1, result.commit) }
+  alice_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group)
+  assert_includes bob_group.past_epochs, epoch_before
+  authenticated_content = deliver(bob_group, late)
+  assert_equal "sent before the commit", authenticated_content.content.application_data
+  assert_equal epoch_before, authenticated_content.content.epoch
+  assert_raises(Melos::ProtocolError) { deliver(bob_group, stale_update) }
+  # with the group's default of two past epochs, the message is refused once three more epochs have passed
+  late = carol_group.create_application_message("much later")
+  3.times do
+    result = alice_group.create_commit
+    [bob_group, carol_group].each { deliver(_1, result.commit) }
+    alice_group.merge_commit(result.staged)
+  end
+  assert_equal Melos::Group::DEFAULT_MAX_PAST_EPOCHS, bob_group.past_epochs.size
+  assert_raises(Melos::ProtocolError) { deliver(bob_group, late) }
+  # a retained epoch keeps only what its messages need (9.2)
+  past = bob_group.instance_variable_get(:@past_epochs).values.first
+  assert_raises(ArgumentError) { past.epoch_secrets.init_secret }
+  puts "[pass] A previous epoch's application message decrypts; handshake messages and expired epochs are refused"
+
   ## Bob proposes an Update; Alice commits it; Bob's new leaf key is in use on both sides
   old_key = bob_group.ratchet_tree.leaf_node_at(1).encryption_key
   update = bob_group.create_update_proposal

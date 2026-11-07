@@ -17,17 +17,16 @@ As of version 0.1.0, this implements:
 - Groups: creating a group, Add / Remove / PreSharedKey / GroupContextExtensions proposals,
   commits with an UpdatePath and the matching Welcome, joining via Welcome,
   application messages as PrivateMessage, handshake messages as PublicMessage or PrivateMessage
-- Processing Update proposals and commits from other members
+- Update proposals, commits without an UpdatePath where the RFC allows them, exporters
+- The deletion schedule of Section 9.2 (as far as Ruby allows: references are dropped, strings are not zeroized)
+- Out-of-order application messages and messages from recent epochs, with bounds on both (Section 15.3)
 - Most MUST-level validations of the RFC; [docs/validation.md](docs/validation.md) maps each one to the code
 - All test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md),
   plus round-trip tests in which several members create, join, message and leave a group
 
 It does not yet implement:
 
-- Creating Update proposals
 - ReInit, external commits (ExternalInit), external senders, resumption PSKs, subgroup branching
-- Decrypting application messages from earlier epochs, and keeping unused keys for out-of-order delivery
-- The deletion schedule of Section 9.2 beyond dropping the previous epoch
 - Credential validation beyond basic credentials (an application hook, `credential_validator:`, is provided)
 - Persistence of client and group state
 - Interop testing against other implementations

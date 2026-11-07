@@ -8,7 +8,7 @@ require_relative 'secret_tree'
 # A new epoch comes from #next with the commit secret, PSK secret and new GroupContext,
 # which uses this epoch's init_secret as Section 8 describes.
 class Melos::EpochSecrets
-  attr_reader :suite, :epoch_secret, :joiner_secret, :psk_secret, :n_leaves
+  attr_reader :suite, :epoch_secret, :joiner_secret, :psk_secret, :n_leaves, :secret_tree_options
 
   # Table 4, plus init_secret which is derived the same way
   DERIVED_SECRETS = {
@@ -30,7 +30,9 @@ class Melos::EpochSecrets
   end
 
   # derived: secrets known without an epoch_secret (see .from_init_secret and .from_components)
-  def initialize(suite, epoch_secret: nil, joiner_secret: nil, psk_secret: nil, n_leaves: nil, derived: {})
+  # secret_tree_options: passed to Melos::SecretTree (max_forward_distance:, out_of_order_tolerance:);
+  #                      every epoch made by #next inherits them
+  def initialize(suite, epoch_secret: nil, joiner_secret: nil, psk_secret: nil, n_leaves: nil, derived: {}, secret_tree_options: {})
     unknown = derived.keys - DERIVED_SECRETS.keys
     raise ArgumentError.new("unknown secrets: #{unknown.join(', ')}") unless unknown.empty?
     @suite = suite
@@ -39,6 +41,7 @@ class Melos::EpochSecrets
     @psk_secret = psk_secret
     @n_leaves = n_leaves
     @derived = derived.dup
+    @secret_tree_options = secret_tree_options
   end
 
   def self.from_epoch_secret(suite, epoch_secret, n_leaves: nil)
@@ -47,16 +50,17 @@ class Melos::EpochSecrets
 
   # 8: epoch_secret = ExpandWithLabel(Extract(joiner_secret, psk_secret), "epoch", GroupContext)
   # This is how a new member joins an epoch from a Welcome (12.4.3.1).
-  def self.from_joiner(suite, joiner_secret, psk_secret, group_context, n_leaves: nil)
+  def self.from_joiner(suite, joiner_secret, psk_secret, group_context, n_leaves: nil, secret_tree_options: {})
     member_secret = Melos::Crypto.kdf_extract(suite, joiner_secret, psk_secret)
     epoch_secret = Melos::Crypto.expand_with_label(suite, member_secret, "epoch", group_context.raw, suite.kdf.n_h)
-    new(suite, epoch_secret: epoch_secret, joiner_secret: joiner_secret, psk_secret: psk_secret, n_leaves: n_leaves)
+    new(suite, epoch_secret: epoch_secret, joiner_secret: joiner_secret, psk_secret: psk_secret, n_leaves: n_leaves,
+               secret_tree_options: secret_tree_options)
   end
 
   # 8: the state before an epoch exists, when only init_secret is known (a fresh random
   # value for a new group). Only #next is meaningful on it.
-  def self.from_init_secret(suite, init_secret)
-    new(suite, derived: { init_secret: init_secret })
+  def self.from_init_secret(suite, init_secret, secret_tree_options: {})
+    new(suite, derived: { init_secret: init_secret }, secret_tree_options: secret_tree_options)
   end
 
   # an epoch given by some of its derived secrets rather than by epoch_secret; for test vectors
@@ -92,7 +96,7 @@ class Melos::EpochSecrets
     joiner_secret = Melos::Crypto.expand_with_label(
       @suite, Melos::Crypto.kdf_extract(@suite, init_secret, commit_secret), "joiner", group_context.raw, @suite.kdf.n_h
     )
-    self.class.from_joiner(@suite, joiner_secret, psk_secret, group_context, n_leaves: n_leaves)
+    self.class.from_joiner(@suite, joiner_secret, psk_secret, group_context, n_leaves: n_leaves, secret_tree_options: @secret_tree_options)
   end
 
   # 8.5: MLS-Exporter(label, context, length) = ExpandWithLabel(DeriveSecret(exporter_secret, label), "exported", Hash(context), length)
@@ -115,10 +119,19 @@ class Melos::EpochSecrets
     self
   end
 
+  # 9.1, 15.3: what an epoch that is no longer current keeps so that its late application messages
+  # can still be read: the secret tree and the sender data secret. Everything else, init_secret
+  # included (consumed by the next epoch, 9.2), is dropped.
+  def retain_for_past_messages!
+    discard_consumed!
+    @derived.select! { |name, _| name == :sender_data_secret }
+    self
+  end
+
   # 9: this epoch's secret tree, built on first use
   def secret_tree
     raise ArgumentError.new('n_leaves is needed to build the secret tree') if @n_leaves.nil?
-    @secret_tree ||= Melos::SecretTree.new(@suite, @n_leaves, encryption_secret)
+    @secret_tree ||= Melos::SecretTree.new(@suite, @n_leaves, encryption_secret, **@secret_tree_options)
   end
 
   private

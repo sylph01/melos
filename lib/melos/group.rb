@@ -36,6 +36,16 @@ class Melos::Group
   # and the staged state to merge once the Delivery Service has accepted the commit
   CommitResult = Struct.new(:commit, :welcome, :staged, keyword_init: true)
 
+  # 9.1, 15.3: an epoch that is no longer current, kept so its late application messages can be read:
+  # its secret tree and sender data secret, and the GroupContext and tree its senders signed against
+  PastEpoch = Struct.new(:epoch_secrets, :group_context, :ratchet_tree, keyword_init: true)
+
+  # 15.3: how many epochs before the current one keep their secret trees for late application messages
+  DEFAULT_MAX_PAST_EPOCHS = 2
+
+  # the options of .create and .from_welcome that configure the secret tree's ratchets (Melos::SecretTree)
+  SECRET_TREE_OPTIONS = %i[max_forward_distance out_of_order_tolerance].freeze
+
   attr_reader :suite, :group_id, :epoch, :leaf_index, :ratchet_tree, :private_tree, :extensions,
               :confirmed_transcript_hash, :interim_transcript_hash, :epoch_secrets, :resumption_psks, :external_psks
 
@@ -43,9 +53,13 @@ class Melos::Group
   #   credential_validator: ->(credential, leaf_node) { true/false }, the application's Authentication Service check (5.3.1);
   #                         the default accepts basic credentials only
   #   max_leaf_node_lifetime: longest acceptable Lifetime of a leaf node in seconds (7.2); nil for no limit
+  #   max_past_epochs: how many earlier epochs still accept application messages (15.3); 0 for none
+  # .create and .from_welcome also take max_forward_distance: and out_of_order_tolerance: for the
+  # secret tree's ratchets (Melos::SecretTree); epochs created by commits inherit them.
   def initialize(suite:, group_id:, epoch:, leaf_index:, signature_private_key:, ratchet_tree:, private_tree:,
                  extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {},
-                 credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME)
+                 credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME,
+                 max_past_epochs: DEFAULT_MAX_PAST_EPOCHS)
     @suite = suite
     @group_id = group_id
     @epoch = epoch
@@ -60,6 +74,8 @@ class Melos::Group
     @external_psks = external_psks # psk_id -> psk
     @credential_validator = credential_validator
     @max_leaf_node_lifetime = max_leaf_node_lifetime
+    @max_past_epochs = max_past_epochs
+    @past_epochs = {} # epoch -> PastEpoch, for late application messages (9.1, 15.3)
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @pending_updates = {}   # encryption_key -> private key, for Update proposals we sent this epoch (12.1.2)
@@ -82,6 +98,8 @@ class Melos::Group
   # 11: create a group whose only member is this leaf
   #   external_psks: psk_id -> psk, for external PSKs that commits may reference
   def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [], external_psks: {}, **options)
+    secret_tree_options = options.slice(*SECRET_TREE_OPTIONS)
+    options = options.except(*SECRET_TREE_OPTIONS)
     Melos::Struct::Extension.check_unique_types!(extensions, 'GroupContext extensions')
     ratchet_tree = Melos::RatchetTree.new(suite, [Melos::Struct::Node.new_leaf_node(leaf_node)])
     private_tree = Melos::PrivateTree.new
@@ -91,7 +109,7 @@ class Melos::Group
       tree_hash: ratchet_tree.root_tree_hash, confirmed_transcript_hash: '', extensions: extensions
     )
     # 8: epoch 0 is derived from a fresh random init_secret, an all-zero commit secret and no PSKs
-    epoch_secrets = Melos::EpochSecrets.from_init_secret(suite, SecureRandom.random_bytes(suite.kdf.n_h))
+    epoch_secrets = Melos::EpochSecrets.from_init_secret(suite, SecureRandom.random_bytes(suite.kdf.n_h), secret_tree_options: secret_tree_options)
       .next(Melos::Crypto::Util.zero_vector(suite.kdf.n_h), Melos::PSK.psk_secret(suite, []), group_context, n_leaves: 1)
     confirmation_tag = Melos::Crypto.mac(suite, epoch_secrets.confirmation_key, '')
     new(
@@ -110,6 +128,8 @@ class Melos::Group
   #   ratchet_tree: serialized tree, if it was delivered outside the Welcome's ratchet_tree extension
   def self.from_welcome(suite, welcome, key_package:, init_private_key:, encryption_private_key:, signature_private_key:,
                         external_psks: {}, ratchet_tree: nil, **options)
+    secret_tree_options = options.slice(*SECRET_TREE_OPTIONS)
+    options = options.except(*SECRET_TREE_OPTIONS)
     if welcome.is_a?(Melos::Struct::MLSMessage)
       check_message_version!(welcome)
       welcome = welcome.welcome
@@ -173,7 +193,8 @@ class Melos::Group
     end
 
     # Enter the epoch's key schedule and check the GroupInfo's confirmation tag against it
-    epoch_secrets = Melos::EpochSecrets.from_joiner(suite, group_secrets.joiner_secret, psk_secret, group_context, n_leaves: tree.n_leaves)
+    epoch_secrets = Melos::EpochSecrets.from_joiner(suite, group_secrets.joiner_secret, psk_secret, group_context, n_leaves: tree.n_leaves,
+                                                    secret_tree_options: secret_tree_options)
     expected_tag = Melos::Crypto.mac(suite, epoch_secrets.confirmation_key, group_context.confirmed_transcript_hash)
     raise Melos::ProtocolError.new('GroupInfo confirmation tag does not verify') unless group_info.confirmation_tag == expected_tag
 
@@ -213,26 +234,40 @@ class Melos::Group
 
   ## Receiving messages (6, 12.4)
 
-  # Unprotect an MLSMessage sent in this group in the current epoch and verify its signature.
+  # Unprotect an MLSMessage sent in this group and verify its signature. Handshake messages must be
+  # from the current epoch; application messages may also come from one of the last max_past_epochs
+  # epochs (9.1, 15.3), and are then checked against that epoch's secrets, tree and GroupContext.
   # Returns the Melos::Struct::AuthenticatedContent.
   def unprotect(mls_message)
     self.class.check_message_version!(mls_message)
+    epoch_secrets, context, tree = @epoch_secrets, group_context, @ratchet_tree
     authenticated_content =
       case mls_message.wire_format
       when Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
         mls_message.public_message.unprotect(@suite, @epoch_secrets.membership_key, group_context) or
           raise Melos::ProtocolError.new('membership tag does not verify')
       when Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE
-        # TODO: messages from earlier epochs need that epoch's secret tree
-        mls_message.private_message.unprotect(@suite, @epoch_secrets.secret_tree, @epoch_secrets.sender_data_secret)
+        private_message = mls_message.private_message
+        raise Melos::ProtocolError.new('message is for a different group') unless private_message.group_id == @group_id
+        if private_message.epoch != @epoch
+          past = @past_epochs[private_message.epoch] if private_message.content_type == Melos::Constants::ContentType::APPLICATION
+          raise Melos::ProtocolError.new("message is for epoch #{private_message.epoch}, current epoch is #{@epoch}") if past.nil?
+          epoch_secrets, context, tree = past.epoch_secrets, past.group_context, past.ratchet_tree
+        end
+        private_message.unprotect(@suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
       else
         raise ArgumentError.new('not a PublicMessage or PrivateMessage')
       end
     content = authenticated_content.content
     raise Melos::ProtocolError.new('message is for a different group') unless content.group_id == @group_id
-    raise Melos::ProtocolError.new("message is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == @epoch
-    raise Melos::ProtocolError.new('signature does not verify') unless authenticated_content.verify(@suite, sender_signature_key(content.sender), group_context)
+    raise Melos::ProtocolError.new("message is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == context.epoch
+    raise Melos::ProtocolError.new('signature does not verify') unless authenticated_content.verify(@suite, sender_signature_key(content.sender, tree), context)
     authenticated_content
+  end
+
+  # the earlier epochs whose application messages are still accepted, oldest first
+  def past_epochs
+    @past_epochs.keys
   end
 
   # Unprotect a message and act on it: cache a proposal, apply a commit, hand back application data.
@@ -275,6 +310,7 @@ class Melos::Group
       @pending_proposals = {}
       return self
     end
+    retain_past_epoch!
     @ratchet_tree = staged.ratchet_tree
     @private_tree = staged.private_tree
     @extensions = staged.extensions
@@ -524,6 +560,17 @@ class Melos::Group
     )
   end
 
+  # 9.1, 15.3: as the group leaves the current epoch, keep what its late application messages need,
+  # and forget epochs older than max_past_epochs (9.2: their secrets are then deleted)
+  def retain_past_epoch!
+    if @max_past_epochs.positive?
+      @past_epochs[@epoch] = PastEpoch.new(
+        epoch_secrets: @epoch_secrets.retain_for_past_messages!, group_context: group_context, ratchet_tree: @ratchet_tree
+      )
+    end
+    @past_epochs.delete_if { |epoch, _| epoch <= @epoch - @max_past_epochs }
+  end
+
   def ensure_active!
     raise Melos::StateError.new("this member was removed from the group in epoch #{@epoch}") unless @active
   end
@@ -550,11 +597,11 @@ class Melos::Group
     end
   end
 
-  # 6.1: the key that signed a message from this sender
-  def sender_signature_key(sender)
+  # 6.1: the key that signed a message from this sender, in tree
+  def sender_signature_key(sender, tree = @ratchet_tree)
     case sender.sender_type
     when Melos::Constants::SenderType::MEMBER
-      leaf_node = @ratchet_tree.leaf_node_at(sender.leaf_index)
+      leaf_node = tree.leaf_node_at(sender.leaf_index)
       raise Melos::ProtocolError.new("sender leaf #{sender.leaf_index} is blank") if leaf_node.nil?
       leaf_node.signature_key
     else

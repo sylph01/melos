@@ -90,7 +90,7 @@ zeroized, so this is about not retaining references; say so in the docs.
 **Test.** After a commit, the previous epoch's secrets are gone from the group; `private_tree`
 holds exactly the keys for nodes on our direct path that exist.
 
-## 6. Out-of-order and old-epoch application messages (M) — RFC 9.1, 15.3, 12.4.2
+## 6. Out-of-order and old-epoch application messages (M) — RFC 9.1, 15.3, 12.4.2 — done
 
 **RFC.** Receivers keep unused generation keys of a sender's ratchet for a while, and the secret
 trees of recent epochs, so delayed and reordered messages decrypt. Applications SHOULD bound how
@@ -108,6 +108,13 @@ current-epoch only. Interacts with 5: a retained epoch's secrets are not yet "co
 
 **Test.** Deliver two application messages in reverse order; deliver an application message from the
 previous epoch after a commit; a generation jump beyond the bound is rejected.
+
+**Done as.** `SecretTree::Ratchet` keeps skipped `generation => [key, nonce]`, bounded by
+`out_of_order_tolerance:` (default 100, oldest dropped) and `max_forward_distance:` (default 1000,
+`ProtocolError` beyond). `Group` keeps `PastEpoch` (secret tree and sender data secret only, plus the
+GroupContext and tree for the signature check) for `max_past_epochs:` epochs (default 2). The
+options go to `Group.create` / `.from_welcome` (and so `Client#create_group` / `#join_group`).
+AEAD failures now raise `ProtocolError`.
 
 ## 7. External senders and external proposals (M) — RFC 12.1.8, 12.1.8.1, 6.1
 
@@ -229,5 +236,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5~~ → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6~~ → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

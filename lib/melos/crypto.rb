@@ -303,8 +303,11 @@ class Melos::Crypto
     suite.hpke.aead_encrypt(key, nonce, aad, plaintext)
   end
 
+  # a ciphertext that does not authenticate is input to reject (Melos::ProtocolError)
   def self.aead_decrypt(suite, key, nonce, aad, ciphertext)
     suite.hpke.aead_decrypt(key, nonce, aad, ciphertext)
+  rescue OpenSSL::Cipher::CipherError => e
+    raise Melos::ProtocolError.new("AEAD decryption failed: #{e.message}")
   end
 
   def self.sender_data_key(suite, sender_data_secret, ciphertext)

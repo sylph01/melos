@@ -272,6 +272,34 @@ assert_equal "once", bob_group.process_message(wire(message)).content.applicatio
 assert_raises(Melos::StateError) { bob_group.process_message(wire(message)) }
 puts "[pass] a replayed application message is refused"
 
+## 15.3 a ratchet moves forward a bounded distance per message and keeps a bounded number of skipped keys
+tree = Melos::SecretTree.new(suite, 2, "s" * suite.kdf.n_h, max_forward_distance: 5, out_of_order_tolerance: 2)
+assert_raises(Melos::ProtocolError) { tree.ratchet_until_and_get(C::ContentType::APPLICATION, 0, 6) }
+assert_equal 5, tree.ratchet_until_and_get(C::ContentType::APPLICATION, 0, 5)[2]
+assert_equal [3, 4], tree.ratchet_for(C::ContentType::APPLICATION, 0).skipped_generations
+assert_raises(Melos::StateError) { tree.ratchet_until_and_get(C::ContentType::APPLICATION, 0, 2) } # dropped from the window
+assert_equal 3, tree.ratchet_until_and_get(C::ContentType::APPLICATION, 0, 3)[2]
+assert_raises(Melos::StateError) { tree.ratchet_until_and_get(C::ContentType::APPLICATION, 0, 3) } # used
+# and in a group: Bob accepts a jump of at most 1 generation
+frank = Melos::Client.new(suite_id, identity: 'frank')
+grace = Melos::Client.new(suite_id, identity: 'grace')
+frank_group = frank.create_group("forward-distance")
+frank_group.create_add_proposal(wire(grace.create_key_package.message))
+result = frank_group.create_commit
+grace_group = grace.join_group(wire(result.welcome), max_forward_distance: 1, max_past_epochs: 0)
+frank_group.merge_commit(result.staged)
+messages = 3.times.map { frank_group.create_application_message("m#{_1}") }
+assert_raises(Melos::ProtocolError) { grace_group.process_message(wire(messages[2])) }
+assert_equal "m1", grace_group.process_message(wire(messages[1])).content.application_data
+# max_past_epochs: 0 keeps no earlier epoch
+late = frank_group.create_application_message("late")
+result = frank_group.create_commit
+grace_group.process_message(wire(result.commit))
+frank_group.merge_commit(result.staged)
+assert_empty grace_group.past_epochs
+assert_raises(Melos::ProtocolError) { grace_group.process_message(wire(late)) }
+puts "[pass] ratchet jumps beyond the bound, dropped and used generations, and expired epochs are refused"
+
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
 bob_group.process_message(wire(result.commit))

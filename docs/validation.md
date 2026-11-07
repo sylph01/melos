@@ -25,7 +25,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 1.7 | SenderData.leaf_index MUST identify a non-blank leaf | 6.3.2 | partial | caught later by `#sender_signature_key` ("sender leaf is blank") after decryption; the RFC wants it checked when the sender data is parsed |
 | 1.8 | Application data MUST be sent as PrivateMessage | 6 | done | `AuthenticatedContent#sign` raises on send; `#verify` returns false on receive |
 | 1.9 | Proposal and Commit epoch MUST equal the current epoch | 12.1, 12.4.2 | done | `Group#unprotect` |
-| 1.10 | Application messages from earlier epochs may be decrypted (15.3); not a MUST, but today `Group#unprotect` rejects any epoch other than the current one, which is stricter than the RFC | 15.3 | behavior gap | needs per-epoch secret trees kept for a while (also 9.2) |
+| 1.10 | Application messages from earlier epochs and out of order may be decrypted, within application-chosen bounds (9.1, 15.3); handshake messages stay current-epoch only | 9.1, 15.3 | done | `Group#unprotect` selects a `PastEpoch` (`max_past_epochs:`) for application PrivateMessages; `SecretTree::Ratchet` keeps skipped keys (`out_of_order_tolerance:`) and refuses jumps over `max_forward_distance:` |
 | 1.11 | MLSMessage.version MUST be mls10 | 6 | done | `Group.check_message_version!` in `#unprotect`, `.from_welcome`, `#create_add_proposal` |
 | 1.12 | AAD plus ciphertext MUST fit the AEAD limits | 6.3.1, 15.2 | missing *(application)* | no size accounting anywhere |
 
@@ -35,7 +35,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 |---|---|---|---|---|
 | 2.1 | Verify signature and epoch before caching | 12.1 | done | `Group#unprotect`, `#process_proposal` |
 | 2.2 | Add: KeyPackage valid per 10.1 (see section 4) | 12.1.1 | done | `#apply_proposals` -> `#validate_key_package!` |
-| 2.3 | Update: LeafNode valid for an Update per 7.3, source `update`, encryption_key differs from the replaced leaf | 12.1.2, 7.3 | done | `#apply_proposals` -> `#validate_leaf_node!(context: :update)`; creating Update proposals is still unimplemented |
+| 2.3 | Update: LeafNode valid for an Update per 7.3, source `update`, encryption_key differs from the replaced leaf | 12.1.2, 7.3 | done | `#apply_proposals` -> `#validate_leaf_node!(context: :update)`; sent by `#create_update_proposal` |
 | 2.4 | Remove: `removed` MUST be a non-blank leaf | 12.1.3 | done | `#apply_proposals` (both sides), `#create_remove_proposal` |
 | 2.5 | PreSharedKey: psk_nonce length MUST be KDF.Nh | 12.1.4 | done | `#psk_secret_for` |
 | 2.6 | PreSharedKey: resumption with usage reinit or branch is invalid outside those operations | 12.1.4, 11.2, 11.3 | **missing** | `#psk_secret_for` looks up any resumption PSK by epoch regardless of usage |
@@ -112,7 +112,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 6.12 | After a ReInit commit the group MUST NOT be used; wait for the Welcome | 12.4.2 | n/a | ReInit rejected |
 | 6.13 | A member that observed proposals MUST commit before sending application data | 12.4 | done | `#create_application_message` |
 | 6.14 | Generating a Commit MUST NOT modify state; Welcome MUST NOT be delivered until the Commit is accepted | 14 | done / *(application)* | `#create_commit` returns a `StagedCommit`; delivery is the caller's |
-| 6.15 | After processing a path, outdated key material MUST be deleted | 7.5, 9.2 | partial | old epochs are dropped on merge; the `PrivateTree` keeps stale keys for replaced nodes, and `EpochSecrets` memoizes derived secrets for the epoch's lifetime |
+| 6.15 | After processing a path, outdated key material MUST be deleted | 7.5, 9.2 | done | `EpochSecrets#discard_consumed!`, `PrivateTree#prune!` in `#merge_commit`; retained past epochs keep only their secret tree and sender data secret. Ruby cannot zeroize strings |
 
 ## 7. Joining via Welcome (Sections 12.4.3, 12.4.3.1, 12.4.3.3, 13.4)
 
@@ -165,4 +165,4 @@ Service; melos should offer a hook or a documented default, not decide the polic
 3. ~~**KeyPackage and LeafNode validation**: sections 4 and 5 as one `LeafNode` validator parameterized by context (key_package / update / commit / tree), used by Add processing, commit path processing and join; includes signature, source, extension and capability checks, key uniqueness. Credential validation and maximum lifetime become hooks with defaults.~~ Done.
 4. ~~**Join integrity**: 7.8 to 7.12 and 7.14 on top of the validator from step 3.~~ Done.
 5. ~~**Client-level**: 7.5 group_id uniqueness, 7.1 KeyPackage suite check.~~ Done.
-6. **Later, with the features they belong to**: external senders (1.2, 2.9), resumption PSK rules (2.6, 7.3), ReInit, external commits, old-epoch application messages (1.10), deletion schedule (6.15).
+6. **Later, with the features they belong to**: external senders (1.2, 2.9), resumption PSK rules (2.6, 7.3), ReInit, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.
