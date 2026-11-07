@@ -33,17 +33,18 @@ secret_tree_vectors.each do |stv|
 
   encryption_secret = from_hex(stv['encryption_secret'])
   ## Initialize a secret tree with a number of leaves equal to the number of entries in the leaves array
-  secret_tree = Melos::SecretTree.create(suite, n_leaves, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, n_leaves, encryption_secret)
 
   stv['leaves'].each_with_index do |array, leaf_index|
     puts "for leaf index #{leaf_index}:"
     array.each do |gen|
-      Melos::SecretTree.ratchet_application_until(suite, secret_tree, leaf_index, gen['generation'])
-      Melos::SecretTree.ratchet_handshake_until(suite, secret_tree, leaf_index, gen['generation'])
-      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_key']), gen['handshake_key']
-      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['handshake_nonce']), gen['handshake_nonce']
-      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_key']), gen['application_key']
-      assert_equal to_hex(secret_tree.leaf_at(leaf_index)['application_nonce']), gen['application_nonce']
+      ## For each entry in the array: derive the handshake and application keys and nonces for the given generation
+      handshake_key, handshake_nonce, = secret_tree.ratchet_until_and_get(Melos::Constants::ContentType::PROPOSAL, leaf_index, gen['generation'])
+      application_key, application_nonce, = secret_tree.ratchet_until_and_get(Melos::Constants::ContentType::APPLICATION, leaf_index, gen['generation'])
+      assert_equal gen['handshake_key'], to_hex(handshake_key)
+      assert_equal gen['handshake_nonce'], to_hex(handshake_nonce)
+      assert_equal gen['application_key'], to_hex(application_key)
+      assert_equal gen['application_nonce'], to_hex(application_nonce)
       puts "[s] at generation #{gen['generation']}, handshake_(key/nonce), application_(key/nonce) matches"
     end
   end

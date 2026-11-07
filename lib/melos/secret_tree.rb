@@ -1,109 +1,92 @@
 require_relative 'tree'
 require_relative 'crypto'
+require_relative 'constants'
 
-module Melos::SecretTree
-  def self.create(suite, n_leaves, encryption_secret)
-    st = Melos::Tree.empty_tree(n_leaves)
-    populate_tree(suite, st, encryption_secret)
-    st
-  end
+# The secret tree (RFC 9420 Section 9): the per-epoch tree of secrets derived from the
+# encryption_secret, with the same shape as the ratchet tree. Only the two hash ratchets
+# at each leaf are kept; the node secrets above them are discarded once derived.
+class Melos::SecretTree
+  # 9.1: a hash ratchet over one leaf's secret. Each generation yields a key and nonce
+  # and steps the secret forward; older secrets are forgotten.
+  class Ratchet
+    attr_reader :next_generation
 
-  def self.populate_tree(suite, tree, root_secret)
-    populate_tree_impl(suite, tree, tree.root, root_secret)
-  end
+    def initialize(suite, secret)
+      @suite = suite
+      @secret = secret
+      @next_generation = 0
+      @current = nil # [key, nonce, generation] of the last generation derived
+    end
 
-  def self.populate_tree_impl(suite, tree, index, secret)
-    tree.array[index] = {
-      'handshake_ratchet_secret' => Melos::Crypto.expand_with_label(suite, secret, "handshake",   "", suite.kdf.n_h),
-      'application_ratchet_secret' => Melos::Crypto.expand_with_label(suite, secret, "application", "", suite.kdf.n_h),
-      'next_handshake_ratchet_secret_generation' => 0,
-      'next_application_ratchet_secret_generation' => 0
-    }
-    unless Melos::Tree.leaf?(index)
-      left_secret  = Melos::Crypto.expand_with_label(suite, secret, "tree", "left", suite.kdf.n_h)
-      right_secret = Melos::Crypto.expand_with_label(suite, secret, "tree", "right", suite.kdf.n_h)
-      populate_tree_impl(suite, tree, Melos::Tree.left(index), left_secret)
-      populate_tree_impl(suite, tree, Melos::Tree.right(index), right_secret)
+    # derive the key and nonce of the current generation and step the ratchet
+    def ratchet
+      generation = @next_generation
+      nonce = Melos::Crypto.derive_tree_secret(@suite, @secret, "nonce", generation, @suite.hpke.n_n)
+      key   = Melos::Crypto.derive_tree_secret(@suite, @secret, "key",   generation, @suite.hpke.n_k)
+      @secret = Melos::Crypto.derive_tree_secret(@suite, @secret, "secret", generation, @suite.kdf.n_h)
+      @next_generation += 1
+      @current = [key, nonce, generation]
+    end
+
+    # the key and nonce of the given generation, ratcheting forward as needed.
+    # TODO (9.1): keep a window of unconsumed generations so that out-of-order messages can be decrypted
+    def ratchet_until(generation)
+      if generation < @next_generation - 1
+        raise ArgumentError.new("generation #{generation} has already been consumed (next generation is #{@next_generation})")
+      end
+      ratchet while @next_generation <= generation
+      @current
     end
   end
 
-  def self.ratchet_until_and_get(suite, content_type, tree, leaf_index, generation)
-    # TODO: clear the value on tree when getting
-    case content_type
-    when 0x02, 0x03
-      ratchet_handshake_until(suite, tree, leaf_index, generation)
-      [
-        tree.leaf_at(leaf_index)['handshake_key'],
-        tree.leaf_at(leaf_index)['handshake_nonce'],
-        generation
-      ]
+  attr_reader :suite, :n_leaves
+
+  def initialize(suite, n_leaves, encryption_secret)
+    @suite = suite
+    @n_leaves = n_leaves
+    @handshake_ratchets = []   # by leaf index
+    @application_ratchets = [] # by leaf index
+    populate(Melos::Tree.root(n_leaves), encryption_secret)
+  end
+
+  # sender side: the key and nonce of the next generation for this leaf and content type
+  # returns [key, nonce, generation]
+  def ratchet_and_get(content_type, leaf_index)
+    ratchet_for(content_type, leaf_index).ratchet
+  end
+
+  # receiver side: the key and nonce of a given generation for this leaf and content type
+  # returns [key, nonce, generation]
+  def ratchet_until_and_get(content_type, leaf_index, generation)
+    ratchet_for(content_type, leaf_index).ratchet_until(generation)
+  end
+
+  private
+
+  # 9: derive the secrets of the subtree under node_index down to the leaves
+  def populate(node_index, secret)
+    if Melos::Tree.leaf?(node_index)
+      leaf_index = node_index / 2
+      @handshake_ratchets[leaf_index]   = Ratchet.new(@suite, Melos::Crypto.expand_with_label(@suite, secret, "handshake",   "", @suite.kdf.n_h))
+      @application_ratchets[leaf_index] = Ratchet.new(@suite, Melos::Crypto.expand_with_label(@suite, secret, "application", "", @suite.kdf.n_h))
     else
-      ratchet_application_until(suite, tree, leaf_index, generation)
-      [
-        tree.leaf_at(leaf_index)['application_key'],
-        tree.leaf_at(leaf_index)['application_nonce'],
-        generation
-      ]
+      left_secret  = Melos::Crypto.expand_with_label(@suite, secret, "tree", "left",  @suite.kdf.n_h)
+      right_secret = Melos::Crypto.expand_with_label(@suite, secret, "tree", "right", @suite.kdf.n_h)
+      populate(Melos::Tree.left(node_index),  left_secret)
+      populate(Melos::Tree.right(node_index), right_secret)
     end
   end
 
-  def self.ratchet_and_get(suite, content_type, tree, leaf_index)
-    # TODO: clear the value on tree when getting
-    case content_type
-    when 0x02, 0x03
-      ratchet_handshake(suite, tree, leaf_index)
-      [
-        tree.leaf_at(leaf_index)['handshake_key'],
-        tree.leaf_at(leaf_index)['handshake_nonce'],
-        tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] - 1, # returns current generation
-      ]
-    else
-      ratchet_application(suite, tree, leaf_index)
-      [
-        tree.leaf_at(leaf_index)['application_key'],
-        tree.leaf_at(leaf_index)['application_nonce'],
-        tree.leaf_at(leaf_index)['next_application_ratchet_secret_generation'] - 1, # returns current generation
-      ]
-    end
-  end
-
-  def self.ratchet_application_until(suite, tree, leaf_index, generation)
-    while (tree.leaf_at(leaf_index)['next_application_ratchet_secret_generation'] <= generation)
-      ratchet_application(suite, tree, leaf_index)
-    end
-  end
-
-  def self.ratchet_handshake_until(suite, tree, leaf_index, generation)
-    raise ArgumentError.new('cannot generate past generation') if generation < tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] - 1
-    # if current generation, do nothing
-    while (tree.leaf_at(leaf_index)['next_handshake_ratchet_secret_generation'] <= generation)
-      ratchet_handshake(suite, tree, leaf_index)
-    end
-  end
-
-  def self.ratchet_application(suite, tree, leaf_index)
-    node_index = leaf_index * 2
-    generation = tree.array[node_index]['next_application_ratchet_secret_generation']
-    application_ratchet_secret = tree.array[node_index]['application_ratchet_secret']
-    application_nonce = Melos::Crypto.derive_tree_secret(suite, application_ratchet_secret, "nonce", generation, suite.hpke.n_n)
-    application_key   = Melos::Crypto.derive_tree_secret(suite, application_ratchet_secret, "key",   generation, suite.hpke.n_k)
-    next_application_ratchet_secret = Melos::Crypto.derive_tree_secret(suite, application_ratchet_secret, "secret", generation, suite.kdf.n_h)
-    tree.array[node_index]['next_application_ratchet_secret_generation'] = generation + 1
-    tree.array[node_index]['application_ratchet_secret'] = next_application_ratchet_secret
-    tree.array[node_index]['application_nonce'] = application_nonce
-    tree.array[node_index]['application_key']   = application_key
-  end
-
-  def self.ratchet_handshake(suite, tree, leaf_index)
-    node_index = leaf_index * 2
-    generation = tree.array[node_index]['next_handshake_ratchet_secret_generation']
-    handshake_ratchet_secret = tree.array[node_index]['handshake_ratchet_secret']
-    handshake_nonce = Melos::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "nonce", generation, suite.hpke.n_n)
-    handshake_key   = Melos::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "key",   generation, suite.hpke.n_k)
-    next_handshake_ratchet_secret = Melos::Crypto.derive_tree_secret(suite, handshake_ratchet_secret, "secret", generation, suite.kdf.n_h)
-    tree.array[node_index]['next_handshake_ratchet_secret_generation'] = generation + 1
-    tree.array[node_index]['handshake_ratchet_secret'] = next_handshake_ratchet_secret
-    tree.array[node_index]['handshake_nonce'] = handshake_nonce
-    tree.array[node_index]['handshake_key']   = handshake_key
+  # 9.1: handshake messages (proposals and commits) and application messages use separate ratchets
+  def ratchet_for(content_type, leaf_index)
+    ratchets = case content_type
+               when Melos::Constants::ContentType::PROPOSAL, Melos::Constants::ContentType::COMMIT
+                 @handshake_ratchets
+               when Melos::Constants::ContentType::APPLICATION
+                 @application_ratchets
+               else
+                 raise ArgumentError.new("unknown content type #{content_type}")
+               end
+    ratchets[leaf_index] or raise ArgumentError.new("no leaf #{leaf_index} in secret tree with #{@n_leaves} leaves")
   end
 end

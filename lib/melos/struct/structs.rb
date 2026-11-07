@@ -904,7 +904,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     leaf_index = authenticated_content.content.sender.leaf_index
     content_type = authenticated_content.content.content_type
     reuse_guard = SecureRandom.random_bytes(4)
-    key, nonce, generation = Melos::SecretTree::ratchet_and_get(suite, content_type, secret_tree, leaf_index)
+    key, nonce, generation = secret_tree.ratchet_and_get(content_type, leaf_index)
     new_nonce = apply_nonce_reuse_guard(nonce, reuse_guard)
 
     private_message_content_plain = Melos::Struct::PrivateMessageContent.create(
@@ -944,7 +944,7 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
 
   def unprotect(suite, secret_tree, sender_data_secret)
     sender_data = decrypt_sender_data(suite, sender_data_secret)
-    key, nonce, _ = Melos::SecretTree.ratchet_until_and_get(suite, content_type, secret_tree, sender_data.leaf_index, sender_data.generation)
+    key, nonce, _ = secret_tree.ratchet_until_and_get(content_type, sender_data.leaf_index, sender_data.generation)
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
     stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
     pmc = Melos::Struct::PrivateMessageContent.new(stream, content_type: content_type)

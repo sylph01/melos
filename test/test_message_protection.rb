@@ -76,14 +76,14 @@ message_protection_vectors.each do |mpv|
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content = proposal_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -102,7 +102,7 @@ message_protection_vectors.each do |mpv|
   private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
@@ -147,14 +147,14 @@ message_protection_vectors.each do |mpv|
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content = commit_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -175,7 +175,7 @@ message_protection_vectors.each do |mpv|
   private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
@@ -208,14 +208,14 @@ message_protection_vectors.each do |mpv|
   puts "[s] verify that protecting application message fails"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content = application_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -234,7 +234,7 @@ message_protection_vectors.each do |mpv|
   private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
 
   # reset secret tree
-  secret_tree = Melos::SecretTree.create(suite, 2, encryption_secret)
+  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
   authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
