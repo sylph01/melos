@@ -1,0 +1,168 @@
+# RFC 9420 validation checklist
+
+MUST-level requirements of RFC 9420 that apply to a client processing or producing messages,
+mapped to the code as of the step 5 refactor. Status:
+
+- **done**: enforced today, with where.
+- **partial**: enforced in some paths or weaker than the RFC asks.
+- **missing**: not enforced.
+- **n/a**: for features melos does not implement yet (external senders, external commits,
+  ReInit, branching); the code rejects these inputs with a clear error instead.
+
+Items marked *(application)* are MUSTs the RFC places on the application or the Authentication
+Service; melos should offer a hook or a documented default, not decide the policy.
+
+## 1. Message framing and unprotect (Sections 6, 6.1, 6.2, 6.3)
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 1.1 | Verify the signature with the key selected by sender_type | 6.1 | partial | `Group#unprotect`, `#sender_signature_key`: member only; external, new_member_proposal, new_member_commit raise "not supported" |
+| 1.2 | external sender: content_type MUST be proposal, proposal_type MUST be one allowed for external senders | 6.1, 12.1.8 | n/a | rejected with 1.1 |
+| 1.3 | new_member_commit: content_type MUST be commit; new_member_proposal: proposal of type add | 6.1 | n/a | rejected with 1.1 |
+| 1.4 | PublicMessage: check membership_tag for member senders | 6.2 | done | `PublicMessage#unprotect` returns nil, `Group#unprotect` raises |
+| 1.5 | FramedContentAuthData valid: signature and, for commits, confirmation_tag | 6.1, 6.2, 6.3.1 | done | signature in `Group#unprotect`; tag in `Group#stage` |
+| 1.6 | PrivateMessage padding MUST be all zero bytes; reject otherwise | 6.3.1 | **missing** | `PrivateMessageContent` keeps `@padding` but nobody checks it |
+| 1.7 | SenderData.leaf_index MUST identify a non-blank leaf | 6.3.2 | partial | caught later by `#sender_signature_key` ("sender leaf is blank") after decryption; the RFC wants it checked when the sender data is parsed |
+| 1.8 | Application data MUST be sent as PrivateMessage | 6 | done | `AuthenticatedContent#sign` raises on send; `#verify` returns false on receive |
+| 1.9 | Proposal and Commit epoch MUST equal the current epoch | 12.1, 12.4.2 | done | `Group#unprotect` |
+| 1.10 | Application messages from earlier epochs may be decrypted (15.3); not a MUST, but today `Group#unprotect` rejects any epoch other than the current one, which is stricter than the RFC | 15.3 | behavior gap | needs per-epoch secret trees kept for a while (also 9.2) |
+| 1.11 | MLSMessage.version MUST be mls10 | 6 | **missing** | `MLSMessage` parse does not check `version` |
+| 1.12 | AAD plus ciphertext MUST fit the AEAD limits | 6.3.1, 15.2 | missing *(application)* | no size accounting anywhere |
+
+## 2. Proposals as received (Section 12.1)
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 2.1 | Verify signature and epoch before caching | 12.1 | done | `Group#unprotect`, `#process_proposal` |
+| 2.2 | Add: KeyPackage valid per 10.1 (see section 4) | 12.1.1 | **missing** | `Group#apply_proposals` uses the KeyPackage without checks |
+| 2.3 | Update: LeafNode valid for an Update per 7.3, source `update`, encryption_key differs from the replaced leaf | 12.1.2, 7.3 | **missing** | no check; Update proposals are also not created yet |
+| 2.4 | Remove: `removed` MUST be a non-blank leaf | 12.1.3 | **missing** on receive | `#create_remove_proposal` checks; `#apply_proposals` blanks whatever index it is given |
+| 2.5 | PreSharedKey: psk_nonce length MUST be KDF.Nh | 12.1.4 | **missing** | `#psk_secret_for` accepts any nonce |
+| 2.6 | PreSharedKey: resumption with usage reinit or branch is invalid outside those operations | 12.1.4, 11.2, 11.3 | **missing** | `#psk_secret_for` looks up any resumption PSK by epoch regardless of usage |
+| 2.7 | ReInit: version MUST NOT be lower than the current one | 12.1.5 | n/a | ReInit rejected as unsupported |
+| 2.8 | GroupContextExtensions: invalid if required_capabilities not supported by all members after the commit | 12.1.7, 11.1 | **missing** | extensions are replaced without looking at them |
+| 2.9 | External proposals MUST be PublicMessage; only add, remove, psk, reinit, gce from external senders; external_senders extension must be present | 12.1.8 | n/a | rejected with 1.1 |
+| 2.10 | Unknown (non-default) proposal types MUST be supported by every member that processes the commit | 12.2, 13.2 | **missing** | a `Proposal` of unknown type parses with every select field nil and `#apply_proposals` silently ignores it |
+
+## 3. Proposal list validation (Section 12.2), on both creating and processing a Commit
+
+None of these exist. `Group#create_commit` and `Group#stage` both call `#apply_proposals` directly.
+
+| # | Requirement | RFC | Status |
+|---|---|---|---|
+| 3.1 | Every individual proposal valid (sections 2 and 4) | 12.2 | **missing** |
+| 3.2 | No Update proposal by the committer | 12.2 | **missing** |
+| 3.3 | No Remove of the committer | 12.2 | **missing** |
+| 3.4 | No two Update/Remove proposals for the same leaf | 12.2 | **missing** |
+| 3.5 | No two Adds for the same client (e.g. same signature key) | 12.2 | **missing** *(application decides "same client"; default: signature key)* |
+| 3.6 | No Add of a client already in the group unless a Remove in the same list removes it | 12.2 | **missing** *(same default)* |
+| 3.7 | No two PreSharedKey proposals with the same PreSharedKeyID | 12.2 | **missing** |
+| 3.8 | At most one GroupContextExtensions proposal | 12.2 | **missing** |
+| 3.9 | ReInit MUST be alone in the list | 12.2 | n/a (ReInit rejected) |
+| 3.10 | No ExternalInit in a regular commit | 12.2 | done by accident (`#apply_proposals` raises "unsupported") |
+| 3.11 | After applying, every leaf in the tree is valid per 7.3 | 12.2 | **missing** |
+| 3.12 | Reject the Commit if the list is invalid | 12.2 | follows from the above |
+| 3.13 | External commit list rules (exactly one ExternalInit, at most one Remove, PSKs only) | 12.2 | n/a |
+
+## 4. KeyPackage validation (Sections 10, 10.1), when adding and when processing an Add
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 4.1 | cipher_suite and version match the GroupContext | 10.1 | **missing** | |
+| 4.2 | leaf_node valid for a KeyPackage per 7.3 (section 5 below) | 10.1 | **missing** | |
+| 4.3 | Signature verifies with the leaf's signature key | 10, 10.1 | **missing** | `Struct::KeyPackage#verify` exists but is never called |
+| 4.4 | leaf_node.encryption_key MUST differ from init_key | 10.1 | **missing** | |
+| 4.5 | leaf_node_source MUST be key_package | 10 | **missing** | |
+| 4.6 | Extensions in KeyPackage.extensions and leaf_node.extensions MUST be listed in leaf_node.capabilities | 10 | **missing** | |
+| 4.7 | KeyPackage.version MUST equal the enclosing MLSMessage.version | 10 | **missing** | `Group#create_add_proposal` unwraps the MLSMessage without comparing |
+| 4.8 | Unknown capabilities values and unknown extensions MUST be ignored | 13.4 | done by construction | nothing inspects them yet; keep it that way when 4.6 is added |
+| 4.9 | Sender: init_key MUST be unique among the client's KeyPackages | 10 | done | fresh random key per `KeyPackageBundle.generate` |
+| 4.10 | Sender: capabilities MUST list every supported value and MUST NOT list default proposal/extension types | 7.2 | **bug** | `Melos::Capabilities#set_default` lists proposals `[1, 2, 3, 4, 7]`, which are all default types; it should be empty |
+
+## 5. LeafNode validation (Section 7.3), for Add, Update, the Commit path leaf, and every leaf when joining
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 5.1 | Credential valid per 5.3.1 (Authentication Service) | 7.3, 5.3.1 | missing *(application)* | needs a hook; default could accept basic credentials |
+| 5.2 | Signature valid with signature_key (with group_id and leaf_index for update/commit sources) | 7.3 | partial | `Struct::LeafNode#verify` exists and the tree-validation test uses it; `Group` never calls it |
+| 5.3 | If GroupContext has required_capabilities, its extensions, proposals and credential types MUST be in the leaf's capabilities | 7.3, 11.1, 13.4 | **missing** | `RequiredCapabilities` struct exists; nothing parses the extension out of the GroupContext |
+| 5.4 | Credential type supported by all members; leaf supports every credential type in use | 7.3, 13.3 | **missing** | |
+| 5.5 | Lifetime: sender MUST check current time is within lifetime when sending a leaf (Add of a KeyPackage); receiver RECOMMENDED | 7.3 | **missing** on send | `#create_add_proposal` |
+| 5.6 | Application MUST define a maximum total lifetime and reject longer ones | 7.2 | missing *(application)* | a default maximum plus an override |
+| 5.7 | Every non-default extension in the leaf MUST be listed in capabilities.extensions; credential type MUST be in capabilities.credentials | 7.2, 7.3 | **missing** | |
+| 5.8 | leaf_node_source matches the context: key_package / update (and new encryption_key) / commit | 7.3 | **missing** | |
+| 5.9 | signature_key and encryption_key unique among members | 7.3, 16.7 | **missing** | |
+| 5.10 | Each GroupContext extension (non-default) MUST be supported by a new member's capabilities | 13.4 | **missing** | same machinery as 5.3 |
+
+## 6. Commit processing (Sections 12.4, 12.4.2, 7.5, 7.6, 7.9.2)
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 6.1 | Epoch, membership tag or decryption, signature | 12.4.2 | done | `Group#unprotect` |
+| 6.2 | Proposal list valid (section 3) | 12.4.2 | **missing** | |
+| 6.3 | All PreSharedKey proposals available | 12.4.2 | done | `#psk_secret_for` raises |
+| 6.4 | Path MUST be present if the list is empty or has a path-required type | 12.4 | done | `Group#stage` |
+| 6.5 | Path leaf valid per 7.3 with leaf_node_source commit | 12.4.2 | **missing** | |
+| 6.6 | Path leaf encryption_key MUST differ from the committer's current leaf | 12.4.2 | **missing** | |
+| 6.7 | None of the UpdatePath public keys appear in any node of the new tree | 12.4.2 | **missing** | |
+| 6.8 | Recompute the committer's leaf parent_hash and verify it matches the supplied leaf | 7.9.2 | **missing** | `RatchetTree#verify_parent_hash_of_path` exists (treekem test uses it); `#merge_update_path` overwrites the computed hashes without comparing |
+| 6.9 | Each UpdatePathNode's encrypted_path_secret length MUST equal the copath resolution excluding new leaves | 7.6 | partial | `#decrypt_path_secret` checks only the node it decrypts; `#merge_update_path` checks the node count |
+| 6.10 | Confirmation tag verifies against the new epoch | 12.4.2 | done | `Group#stage` |
+| 6.11 | A Commit that removes us: no further sending, delete state (SHOULD) | 12.4.2 | **missing** | our leaf is blanked and `#decrypt_path_secret` then fails with "priv key not found"; should be detected and reported as removal |
+| 6.12 | After a ReInit commit the group MUST NOT be used; wait for the Welcome | 12.4.2 | n/a | ReInit rejected |
+| 6.13 | A member that observed proposals MUST commit before sending application data | 12.4 | **missing** | `#create_application_message` sends while `@pending_proposals` is non-empty |
+| 6.14 | Generating a Commit MUST NOT modify state; Welcome MUST NOT be delivered until the Commit is accepted | 14 | done / *(application)* | `#create_commit` returns a `StagedCommit`; delivery is the caller's |
+| 6.15 | After processing a path, outdated key material MUST be deleted | 7.5, 9.2 | partial | old epochs are dropped on merge; the `PrivateTree` keeps stale keys for replaced nodes, and `EpochSecrets` memoizes derived secrets for the epoch's lifetime |
+
+## 7. Joining via Welcome (Sections 12.4.3, 12.4.3.1, 12.4.3.3, 13.4)
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 7.1 | Find the entry for one of our KeyPackages; error if none or if cipher suites differ | 12.4.3.1 | partial | `Client#join_group` finds the entry; Welcome suite is compared with the client's suite, not with the KeyPackage's `cipher_suite` field |
+| 7.2 | Error if a PSK in GroupSecrets is unknown | 12.4.3.1 | done | `Group.from_welcome` |
+| 7.3 | A resumption PSK with usage reinit or branch MUST be the only such PSK; GroupInfo epoch MUST be 1; reinit/branch consistency checks | 12.4.3.1, 11.2, 11.3 | n/a | resumption PSKs in a Welcome rejected as unsupported |
+| 7.4 | GroupInfo signature with the signer leaf's key; error if blank or invalid | 12.4.3 | done | `Group.from_welcome` |
+| 7.5 | group_id MUST be unique among the groups the client is in | 12.4.3 | **missing** | `Client` does not track its groups |
+| 7.6 | GroupInfo cipher_suite matches the KeyPackage's | 12.4.3.1 | partial | compared with the suite argument, see 7.1 |
+| 7.7 | Tree hash matches GroupContext.tree_hash | 12.4.3.1, 12.4.3.3 | done | `Group.from_welcome` |
+| 7.8 | Every non-blank parent node is parent-hash valid | 12.4.3.1, 7.9.2 | **missing** | `RatchetTree#parent_hash_valid?` exists (tree-validation test uses it); not called on join |
+| 7.9 | Every non-blank leaf valid per 7.3 | 12.4.3.1 | **missing** | |
+| 7.10 | unmerged_leaves: each entry is a non-blank descendant leaf; every non-blank node between also lists it; parent encryption keys unique in the tree | 12.4.3.1 | **missing** | |
+| 7.11 | Our leaf is the one identical to the KeyPackage's LeafNode | 12.4.3.1 | partial | matched by encryption_key only; should compare the whole LeafNode |
+| 7.12 | Derived private keys MUST correspond to the public keys in the nodes | 12.4.3.1 | **missing** | `PrivateTree#consistent?` exists; not called after `set_path_secret` |
+| 7.13 | Confirmation tag verifies with the derived confirmation key | 12.4.3.1 | done | `Group.from_welcome` |
+| 7.14 | Joiner MUST support every GroupContext extension, else the GroupInfo is invalid | 13.4 | **missing** | GroupContext extensions are stored unexamined |
+| 7.15 | Unknown GroupInfo.extensions MUST be ignored | 12.4.3, 13.4 | done | only ratchet_tree is looked up |
+| 7.16 | ratchet_tree extension: last node non-blank, pad to 2^(d+1)-1 | 12.4.3.3 | done | `RatchetTree.parse`, `#initialize` |
+| 7.17 | Download the tree before processing if not in the Welcome | 12.4.3.1 | done | `ratchet_tree:` argument; error if neither |
+
+## 8. Sending side
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 8.1 | Fresh random 4-byte reuse guard, included in SenderData | 6.3.1 | done | `PrivateMessage.protect` |
+| 8.2 | psk_nonce fresh random of length KDF.Nh | 8.4, 12.1.4 | done | `Group#create_psk_proposal` |
+| 8.3 | Proposal list valid when creating a commit | 12.2, 12.4.1 | **missing** | section 3 |
+| 8.4 | Welcome MUST cover every new member; psks in proposal order | 12.4.1 | done | `#create_welcome` |
+| 8.5 | Creator MUST pick the best version/cipher suite supported by all added members | 11 | partial | one suite per group; 4.1 covers the check that an added KeyPackage matches it |
+| 8.6 | Adding a member: its capabilities MUST cover each GroupContext extension and required_capabilities | 13.4, 11.1 | **missing** | same as 5.3 / 5.10 |
+| 8.7 | Lifetime of a KeyPackage leaf checked against the current time when sending an Add | 7.3 | **missing** | see 5.5 |
+| 8.8 | Capabilities content (see 4.10) | 7.2 | **bug** | `Melos::Capabilities` |
+
+## 9. Wire format
+
+| # | Requirement | RFC | Status | Code |
+|---|---|---|---|---|
+| 9.1 | Variable-length vector headers MUST use the minimum length | 2.1.2 | check | `Melos::Vec.parse_stream` raises "invalid header" for some inputs; confirm it rejects non-minimal encodings |
+| 9.2 | Any list of extensions MUST NOT contain two of the same type | 13.4 | **missing** | GroupContext, GroupInfo, KeyPackage, LeafNode extensions are not checked |
+| 9.3 | version fields (MLSMessage, KeyPackage, GroupContext) are mls10 | 6, 8.1, 10 | **missing** | parsed, never checked |
+| 9.4 | Node hash input optional present iff node non-blank | 7.8 | done by construction | `RatchetTree#tree_hash` |
+
+## Suggested order
+
+1. **Cheap and self-contained**: 1.6 padding, 1.11/9.3 version fields, 9.2 duplicate extensions, 2.4 blank Remove, 2.5 nonce length, 2.10 unknown proposal types, 4.10 Capabilities bug, 6.13 commit-before-send, 6.11 detect our own removal.
+2. **Commit integrity**: 6.5 to 6.9 (path leaf validation, key uniqueness, parent hash check, per-node ciphertext counts), then the proposal list rules 3.2 to 3.8 and 3.11, shared by `create_commit` and `stage`.
+3. **KeyPackage and LeafNode validation**: sections 4 and 5 as one `LeafNode` validator parameterized by context (key_package / update / commit / tree), used by Add processing, commit path processing and join; includes signature, source, extension and capability checks, key uniqueness. Credential validation and maximum lifetime become hooks with defaults.
+4. **Join integrity**: 7.8 to 7.12 and 7.14 on top of the validator from step 3.
+5. **Client-level**: 7.5 group_id uniqueness, 7.1 KeyPackage suite check.
+6. **Later, with the features they belong to**: external senders (1.2, 2.9), resumption PSK rules (2.6, 7.3), ReInit, external commits, old-epoch application messages (1.10), deletion schedule (6.15).
