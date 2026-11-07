@@ -85,6 +85,8 @@ suite_ids.each do |suite_id|
   ## Bob adds Carol: Alice sees the proposal first, then the commit by reference; Carol joins
   carol_key_package = carol.create_key_package
   deliver(alice_group, bob_group.create_add_proposal(wire(carol_key_package.message)))
+  # 12.4: having seen a proposal, Alice must not send application data before it is committed
+  assert_raises(ArgumentError) { alice_group.create_application_message("too early") }
   result = bob_group.create_commit
   deliver(alice_group, result.commit)
   bob_group.merge_commit(result.staged)
@@ -117,7 +119,9 @@ suite_ids.each do |suite_id|
   puts "[pass] A commit with an external PSK proposal advances every member"
 
   ## Alice removes Carol: Bob caches the proposal and processes the commit
-  deliver(bob_group, alice_group.create_remove_proposal(2))
+  remove_proposal = alice_group.create_remove_proposal(2)
+  deliver(bob_group, remove_proposal)
+  deliver(carol_group, remove_proposal) # Carol needs the proposal too, to resolve the commit that removes her
   result = alice_group.create_commit
   assert_nil result.welcome
   deliver(bob_group, result.commit)
@@ -127,14 +131,23 @@ suite_ids.each do |suite_id|
   assert_nil alice_group.ratchet_tree.leaf_node_at(2)
   puts "[pass] Alice removes Carol and the tree shrinks back to two leaves"
 
+  ## Carol processes the commit that removed her: she sees it, and can no longer send
+  deliver(carol_group, result.commit)
+  assert_equal false, carol_group.active?
+  assert_raises(ArgumentError) { carol_group.create_application_message("am I still here?") }
+  assert_raises(ArgumentError) { carol_group.create_commit }
+  puts "[pass] Carol learns she was removed and stops sending"
+
   ## A commit referencing a proposal Alice never received is rejected; Bob does not merge it
   bob_group.create_psk_proposal("shared-psk")
   result = bob_group.create_commit
   assert_raises(ArgumentError) { deliver(alice_group, result.commit) }
   puts "[pass] A commit referencing an unseen proposal is rejected"
 
-  ## Both are still in the same epoch and can talk
-  authenticated_content = deliver(alice_group, bob_group.create_application_message("still here"))
+  ## Both are still in the same epoch. Bob has a proposal pending and must commit before he can send (12.4);
+  ## Alice never saw it, so she can.
+  assert_raises(ArgumentError) { bob_group.create_application_message("still here?") }
+  authenticated_content = deliver(bob_group, alice_group.create_application_message("still here"))
   assert_equal "still here", authenticated_content.content.application_data
   puts "[pass] Messages still flow afterwards"
 end

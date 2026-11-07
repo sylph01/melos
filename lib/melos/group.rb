@@ -18,11 +18,19 @@ class Melos::Group
 
   # 12.4.2: the state of the next epoch, computed from a Commit but not yet in effect.
   # It is produced by #stage_commit (received commits) or #create_commit (our own) and applied by #merge_commit.
+  # removes_us: the Commit removed this member; only ratchet_tree, extensions, joiners and psk_ids are then set
   StagedCommit = Struct.new(
     :ratchet_tree, :private_tree, :extensions, :confirmed_transcript_hash, :interim_transcript_hash,
-    :epoch_secrets, :group_context, :confirmation_tag, :joiners, :path_secrets, :psk_ids,
+    :epoch_secrets, :group_context, :confirmation_tag, :joiners, :path_secrets, :psk_ids, :removes_us,
     keyword_init: true
   )
+
+  # the proposal types defined in RFC 9420; any other type is not supported by this implementation (12.2, 13.2)
+  KNOWN_PROPOSAL_TYPES = [
+    Melos::Constants::ProposalType::ADD, Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
+    Melos::Constants::ProposalType::PSK, Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT,
+    Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS
+  ].freeze
 
   # what #create_commit produces: the Commit message to send, the Welcome for any joiners (or nil),
   # and the staged state to merge once the Delivery Service has accepted the commit
@@ -49,11 +57,25 @@ class Melos::Group
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @group_context = nil
+    @active = true # false once a Commit has removed this member (12.4.2)
+  end
+
+  # false after a Commit removed this member: it can no longer send or follow the group,
+  # though #unprotect still works for late messages of the last epoch it was in
+  def active?
+    @active
+  end
+
+  # 6: an MLSMessage's version MUST be mls10
+  def self.check_message_version!(mls_message)
+    return if mls_message.version == Melos::Constants::Version::MLS10
+    raise ArgumentError.new("unsupported MLS version #{mls_message.version}")
   end
 
   # 11: create a group whose only member is this leaf
   #   external_psks: psk_id -> psk, for external PSKs that commits may reference
   def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [], external_psks: {})
+    Melos::Struct::Extension.check_unique_types!(extensions, 'GroupContext extensions')
     ratchet_tree = Melos::RatchetTree.new(suite, [Melos::Struct::Node.new_leaf_node(leaf_node)])
     private_tree = Melos::PrivateTree.new
     private_tree[0] = encryption_private_key
@@ -81,7 +103,10 @@ class Melos::Group
   #   ratchet_tree: serialized tree, if it was delivered outside the Welcome's ratchet_tree extension
   def self.from_welcome(suite, welcome, key_package:, init_private_key:, encryption_private_key:, signature_private_key:,
                         external_psks: {}, ratchet_tree: nil)
-    welcome = welcome.welcome if welcome.is_a?(Melos::Struct::MLSMessage)
+    if welcome.is_a?(Melos::Struct::MLSMessage)
+      check_message_version!(welcome)
+      welcome = welcome.welcome
+    end
     raise ArgumentError.new('not a Welcome message') if welcome.nil?
     raise ArgumentError.new('Welcome is for a different cipher suite') unless welcome.cipher_suite == suite.suite_id
     key_package = key_package.key_package if key_package.is_a?(Melos::Struct::MLSMessage)
@@ -111,7 +136,10 @@ class Melos::Group
       Melos::Crypto.aead_decrypt(suite, welcome_key, welcome_nonce, "", welcome.encrypted_group_info)
     )
     group_context = group_info.group_context
+    raise ArgumentError.new("unsupported MLS version #{group_context.version} in GroupContext") unless group_context.version == Melos::Constants::Version::MLS10
     raise ArgumentError.new('GroupInfo is for a different cipher suite') unless group_context.cipher_suite == suite.suite_id
+    Melos::Struct::Extension.check_unique_types!(group_context.extensions, 'GroupContext extensions')
+    Melos::Struct::Extension.check_unique_types!(group_info.extensions, 'GroupInfo extensions')
 
     # The ratchet tree: delivered out of band, or in the GroupInfo's ratchet_tree extension
     ratchet_tree_data = ratchet_tree || group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }&.extension_data
@@ -172,6 +200,7 @@ class Melos::Group
   # Unprotect an MLSMessage sent in this group in the current epoch and verify its signature.
   # Returns the Melos::Struct::AuthenticatedContent.
   def unprotect(mls_message)
+    self.class.check_message_version!(mls_message)
     authenticated_content =
       case mls_message.wire_format
       when Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
@@ -205,6 +234,7 @@ class Melos::Group
 
   # 12.4: remember a proposal of this epoch so a Commit can reference it
   def process_proposal(authenticated_content)
+    ensure_active!
     raise ArgumentError.new('not a proposal') unless authenticated_content.content.content_type == Melos::Constants::ContentType::PROPOSAL
     @pending_proposals[Melos::Crypto.make_proposal_ref(@suite, authenticated_content.raw)] = authenticated_content
   end
@@ -218,8 +248,15 @@ class Melos::Group
     stage(authenticated_content, own_path: nil)
   end
 
-  # 12.4.2: make a staged commit the current state; the group moves to the next epoch
+  # 12.4.2: make a staged commit the current state; the group moves to the next epoch.
+  # If the commit removed this member, the group becomes inactive instead: it keeps the secrets of
+  # the last epoch it was in so late messages can still be read, but nothing more can be sent or processed.
   def merge_commit(staged)
+    if staged.removes_us
+      @active = false
+      @pending_proposals = {}
+      return self
+    end
     @ratchet_tree = staged.ratchet_tree
     @private_tree = staged.private_tree
     @extensions = staged.extensions
@@ -238,11 +275,14 @@ class Melos::Group
   # Frame, sign and protect content for the wire in the current epoch. Returns a Melos::Struct::MLSMessage.
   #   content_type: Melos::Constants::ContentType; content: application data (String), Proposal or Commit
   def protect(content_type, content, wire_format: Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, authenticated_data: '', padding_size: 0)
+    ensure_active!
     protect_authenticated_content(frame_and_sign(content_type, content, wire_format: wire_format, authenticated_data: authenticated_data), padding_size: padding_size)
   end
 
-  # 6.1: application data is always sent as a PrivateMessage
+  # 6.1: application data is always sent as a PrivateMessage.
+  # 12.4: a member that has seen proposals in this epoch MUST commit them before sending application data.
   def create_application_message(data, authenticated_data: '', padding_size: 0)
+    raise ArgumentError.new('proposals are pending in this epoch; commit them before sending application data') unless @pending_proposals.empty?
     protect(Melos::Constants::ContentType::APPLICATION, data,
             wire_format: Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, authenticated_data: authenticated_data, padding_size: padding_size)
   end
@@ -256,7 +296,12 @@ class Melos::Group
 
   # 12.1.1: key_package is the new member's KeyPackage, or the MLSMessage carrying it
   def create_add_proposal(key_package, **options)
-    key_package = key_package.key_package if key_package.is_a?(Melos::Struct::MLSMessage)
+    if key_package.is_a?(Melos::Struct::MLSMessage)
+      self.class.check_message_version!(key_package)
+      # 10: a KeyPackage carried in an MLSMessage MUST have the same version as the message
+      raise ArgumentError.new('KeyPackage version differs from its MLSMessage') unless key_package.key_package.version == key_package.version
+      key_package = key_package.key_package
+    end
     add = Melos::Struct::Add.create(key_package: key_package)
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: add), **options)
   end
@@ -282,6 +327,7 @@ class Melos::Group
   # has accepted the commit, and send result.welcome to the new members if there are any.
   def create_commit(inline_proposals: [], wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, authenticated_data: '',
                     padding_size: 0, include_ratchet_tree: true)
+    ensure_active!
     proposal_or_refs =
       @pending_proposals.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
       inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
@@ -291,6 +337,7 @@ class Melos::Group
     tree = @ratchet_tree.dup
     private_tree = @private_tree.dup
     extensions, joiners, _psk_ids = apply_proposals(tree, proposals)
+    raise ArgumentError.new('commit removes its own sender') if tree.leaf_node_at(@leaf_index).nil? # 12.2
     # TODO: the path may be left out when 12.4 does not require it
     provisional_group_context = Melos::Struct::GroupContext.create(
       cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
@@ -345,6 +392,7 @@ class Melos::Group
   #   own_path: when we are the committer, { private_tree:, commit_secret:, path_secrets: } from create_update_path;
   #             the confirmation tag is then computed rather than verified
   def stage(authenticated_content, own_path:)
+    ensure_active!
     content = authenticated_content.content
     raise ArgumentError.new('not a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
     raise ArgumentError.new("commit is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == @epoch
@@ -365,6 +413,13 @@ class Melos::Group
     tree = @ratchet_tree.dup
     private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
     extensions, joiners, psk_ids = apply_proposals(tree, proposals)
+
+    # 12.2: a commit MUST NOT remove its own sender
+    raise ArgumentError.new('commit removes its own sender') if tree.leaf_node_at(committer).nil?
+    # 12.4.2: a commit may remove us; we cannot follow it any further, since the path is not encrypted to us
+    if tree.leaf_node_at(@leaf_index).nil?
+      return StagedCommit.new(ratchet_tree: tree, extensions: extensions, joiners: joiners, psk_ids: psk_ids, removes_us: true)
+    end
 
     if commit.path.nil?
       commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
@@ -406,6 +461,10 @@ class Melos::Group
     )
   end
 
+  def ensure_active!
+    raise ArgumentError.new("this member was removed from the group in epoch #{@epoch}") unless @active
+  end
+
   # 6.1: the key that signed a message from this sender
   def sender_signature_key(sender)
     case sender.sender_type
@@ -438,22 +497,35 @@ class Melos::Group
   # Returns [extensions, joiners (Joiner for each added member), psk_ids]
   def apply_proposals(tree, proposals)
     of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
-    unsupported = proposals.map { |proposal, _| proposal.proposal_type } & [Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT]
+    types = proposals.map { |proposal, _sender| proposal.proposal_type }
+    # 12.2, 13.2: a proposal type not supported by every member makes the list invalid; we support only the RFC's own types
+    unknown = types - KNOWN_PROPOSAL_TYPES
+    raise ArgumentError.new("unknown proposal types: #{unknown.map { '0x%04x' % _1 }.join(', ')}") unless unknown.empty?
+    unsupported = types & [Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT]
     raise ArgumentError.new("unsupported proposal types: #{unsupported.map { Melos::Constants::ProposalType::NAMES[_1] }.join(', ')}") unless unsupported.empty?
-    # TODO: validate each proposal (12.1) and the list as a whole (12.2)
+    # TODO: validate each proposal fully (12.1, 7.3, 10.1) and the list as a whole (12.2)
 
     extensions = @extensions
     of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS).each do |proposal, _sender|
+      Melos::Struct::Extension.check_unique_types!(proposal.group_context_extensions.extensions, 'GroupContextExtensions proposal')
       extensions = proposal.group_context_extensions.extensions
     end
     of_type.(Melos::Constants::ProposalType::UPDATE).each do |proposal, sender|
       tree.update_leaf_node(sender, proposal.update.leaf_node)
     end
     of_type.(Melos::Constants::ProposalType::REMOVE).each do |proposal, _sender|
-      tree.remove_leaf_node(proposal.remove.removed) # TODO: if this is our leaf, we have been removed
+      # 12.1.3: removed MUST identify a non-blank leaf (this also rejects two Removes of the same leaf, 12.2)
+      raise ArgumentError.new("Remove proposal names a blank leaf (#{proposal.remove.removed})") if tree.leaf_node_at(proposal.remove.removed).nil?
+      tree.remove_leaf_node(proposal.remove.removed)
     end
     joiners = of_type.(Melos::Constants::ProposalType::ADD).map do |proposal, _sender|
-      Joiner.new(tree.add_leaf_node(proposal.add.key_package.leaf_node), proposal.add.key_package)
+      key_package = proposal.add.key_package
+      # 10.1: the KeyPackage's version and cipher suite MUST match the group's
+      raise ArgumentError.new("Add proposal's KeyPackage has version #{key_package.version}") unless key_package.version == Melos::Constants::Version::MLS10
+      raise ArgumentError.new("Add proposal's KeyPackage is for cipher suite #{key_package.cipher_suite}") unless key_package.cipher_suite == @suite.suite_id
+      Melos::Struct::Extension.check_unique_types!(key_package.extensions, 'KeyPackage extensions')
+      Melos::Struct::Extension.check_unique_types!(key_package.leaf_node.extensions, 'KeyPackage leaf node extensions')
+      Joiner.new(tree.add_leaf_node(key_package.leaf_node), key_package)
     end
     psk_ids = of_type.(Melos::Constants::ProposalType::PSK).map { |proposal, _sender| proposal.psk.psk }
     [extensions, joiners, psk_ids]
@@ -462,6 +534,8 @@ class Melos::Group
   # 8.4: the PSK secret for the PreSharedKeyIDs of a commit
   def psk_secret_for(psk_ids)
     psks = psk_ids.map do |psk_id|
+      # 12.1.4: psk_nonce MUST be KDF.Nh bytes long
+      raise ArgumentError.new('psk_nonce has the wrong length') unless psk_id.psk_nonce.bytesize == @suite.kdf.n_h
       value =
         case psk_id.psktype
         when Melos::Constants::PSKType::EXTERNAL

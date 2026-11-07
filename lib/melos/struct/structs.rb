@@ -134,6 +134,13 @@ class Melos::Struct::Extension < Melos::Struct::Base
     [:extension_type, :uint16], # ExtensionType = uint16
     [:extension_data, :vec]
   ]
+
+  # 13.4: any list of extensions MUST NOT have more than one extension of a given type
+  def self.check_unique_types!(extensions, where)
+    duplicates = extensions.map(&:extension_type).tally.select { |_type, count| count > 1 }.keys
+    return if duplicates.empty?
+    raise ArgumentError.new("#{where} has more than one extension of type #{duplicates.map { '0x%04x' % _1 }.join(', ')}")
+  end
 end
 
 class Melos::Struct::LeafNode < Melos::Struct::Base
@@ -954,6 +961,8 @@ class Melos::Struct::PrivateMessage < Melos::Struct::Base
     new_nonce = self.class.apply_nonce_reuse_guard(nonce, sender_data.reuse_guard)
     stream = StringIO.new(Melos::Crypto.aead_decrypt(suite, key, new_nonce, private_content_aad, ciphertext))
     pmc = Melos::Struct::PrivateMessageContent.new(stream, content_type: content_type)
+    # 6.3.1: the padding MUST be all zero bytes, otherwise the message is malformed
+    raise ArgumentError.new('PrivateMessage padding is not all zero') unless pmc.padding_zero?
 
     fc = Melos::Struct::FramedContent.create(
       group_id: group_id,
@@ -1020,6 +1029,10 @@ class Melos::Struct::PrivateMessageContent < Melos::Struct::Base
 
   def content
     @application_data || @proposal || @commit
+  end
+
+  def padding_zero?
+    @padding.each_byte.all?(&:zero?)
   end
 end
 
