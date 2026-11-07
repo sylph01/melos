@@ -249,6 +249,23 @@ assert_raises(Melos::StateError) { dave.join_group(wire(result.welcome)) }
 assert_equal ["shared-id"], dave.groups.keys
 puts "[pass] a client refuses to create or join a second group with a group_id it is already using"
 
+## 7.3 an Update must bring a new encryption key, and 12.2 a committer must not commit its own Update
+current = bob_group.ratchet_tree.leaf_node_at(1)
+same_key = Melos::Struct::LeafNode.create(
+  encryption_key: current.encryption_key, signature_key: current.signature_key, credential: current.credential, capabilities: current.capabilities,
+  leaf_node_source: C::LeafNodeSource::UPDATE, lifetime: nil, parent_hash: nil, extensions: [], signature: nil
+)
+same_key.sign(suite, bob.signature_private_key, bob_group.group_id, 1)
+same_key_update = bob_group.create_proposal(Melos::Struct::Proposal.create(proposal_type: C::ProposalType::UPDATE, update: Melos::Struct::Update.create(leaf_node: same_key)))
+alice_group.process_message(wire(same_key_update))
+assert_raises(Melos::ProtocolError) { alice_group.create_commit }
+puts "[pass] an Update that keeps the old encryption key is rejected when committed"
+# clear it out with a commit by Bob, who leaves his own Update out
+result = bob_group.create_commit
+alice_group.process_message(wire(result.commit))
+bob_group.merge_commit(result.staged)
+assert_equal alice_group.epoch_authenticator, bob_group.epoch_authenticator
+
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
 bob_group.process_message(wire(result.commit))

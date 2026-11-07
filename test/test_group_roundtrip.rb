@@ -115,6 +115,33 @@ suite_ids.each do |suite_id|
   end
   puts "[pass] Alice's application message decrypts for Bob and Carol"
 
+  ## Bob proposes an Update; Alice commits it; Bob's new leaf key is in use on both sides
+  old_key = bob_group.ratchet_tree.leaf_node_at(1).encryption_key
+  update = bob_group.create_update_proposal
+  deliver(alice_group, update)
+  deliver(carol_group, update)
+  result = alice_group.create_commit
+  [bob_group, carol_group].each { deliver(_1, result.commit) }
+  alice_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group)
+  refute_equal old_key, bob_group.ratchet_tree.leaf_node_at(1).encryption_key
+  assert_equal true, bob_group.private_tree.consistent?(bob_group.ratchet_tree)
+  authenticated_content = deliver(bob_group, alice_group.create_application_message("to the new Bob"))
+  assert_equal "to the new Bob", authenticated_content.content.application_data
+  puts "[pass] Bob's Update is committed by Alice and Bob holds the new key"
+
+  ## Bob proposes another Update but commits himself: his own Update is left out, his path replaces the leaf
+  update = bob_group.create_update_proposal
+  deliver(alice_group, update)
+  deliver(carol_group, update)
+  result = bob_group.create_commit
+  assert_empty result.commit.public_message.content.commit.proposals
+  [alice_group, carol_group].each { deliver(_1, result.commit) }
+  bob_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group)
+  assert_equal true, bob_group.private_tree.consistent?(bob_group.ratchet_tree)
+  puts "[pass] A committer's own Update is superseded by its path"
+
   ## A commit that only adds may omit the UpdatePath (12.4): Dave joins without a path secret
   dave = Melos::Client.new(suite_id, identity: 'dave')
   add_dave = alice_group.create_add_proposal(wire(dave.create_key_package.message))

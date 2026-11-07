@@ -62,6 +62,7 @@ class Melos::Group
     @max_leaf_node_lifetime = max_leaf_node_lifetime
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
+    @pending_updates = {}   # encryption_key -> private key, for Update proposals we sent this epoch (12.1.2)
     @group_context = nil
     @active = true # false once a Commit has removed this member (12.4.2)
   end
@@ -282,6 +283,7 @@ class Melos::Group
     @epoch += 1
     @group_context = nil
     @pending_proposals = {}
+    @pending_updates = {}
     @resumption_psks[@epoch] = @epoch_secrets.resumption_psk
     self
   end
@@ -323,6 +325,32 @@ class Melos::Group
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: add), **options)
   end
 
+  # 12.1.2: propose replacing our leaf with one carrying a fresh encryption key, and optionally new
+  # capabilities or extensions. The new private key is kept until a commit applies the Update; it
+  # takes effect in #merge_commit. Our own commit never references our Update (12.2): its UpdatePath
+  # replaces the leaf anyway.
+  def create_update_proposal(capabilities: nil, extensions: nil, **options)
+    ensure_active!
+    current = @ratchet_tree.leaf_node_at(@leaf_index)
+    key_pair = Melos::Crypto.generate_encapsulation_key_pair(@suite)
+    leaf_node = Melos::Struct::LeafNode.create(
+      encryption_key: Melos::Crypto.serialize_public_key(@suite, key_pair),
+      signature_key: current.signature_key,
+      credential: current.credential,
+      capabilities: capabilities || current.capabilities,
+      leaf_node_source: Melos::Constants::LeafNodeSource::UPDATE,
+      lifetime: nil,
+      parent_hash: nil,
+      extensions: extensions || current.extensions,
+      signature: nil
+    )
+    leaf_node.sign(@suite, @signature_private_key, @group_id, @leaf_index)
+    validate_leaf_node!(leaf_node, context: :update, leaf_index: @leaf_index, tree: @ratchet_tree, extensions: @extensions, replacing: current, sending: true)
+    @pending_updates[leaf_node.encryption_key] = Melos::Crypto.serialize_private_key(@suite, key_pair)
+    update = Melos::Struct::Update.create(leaf_node: leaf_node)
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::UPDATE, update: update), **options)
+  end
+
   # 12.1.3
   def create_remove_proposal(removed_leaf_index, **options)
     raise ArgumentError.new("leaf #{removed_leaf_index} is blank") if @ratchet_tree.leaf_node_at(removed_leaf_index).nil?
@@ -348,8 +376,10 @@ class Melos::Group
                     padding_size: 0, include_ratchet_tree: true, path: :always)
     ensure_active!
     raise ArgumentError.new('path must be :always or :if_required') unless %i[always if_required].include?(path)
+    # 12.2: a commit must not include an Update from the committer, so ours are left out (the path replaces our leaf)
+    referenced = @pending_proposals.reject { |_ref, authenticated_content| own_update?(authenticated_content) }
     proposal_or_refs =
-      @pending_proposals.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
+      referenced.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
       inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
     proposals = resolve_proposals(proposal_or_refs, @leaf_index)
     validate_proposal_list!(proposals, @leaf_index)
@@ -442,6 +472,8 @@ class Melos::Group
     if removes_us
       return StagedCommit.new(ratchet_tree: tree, extensions: extensions, joiners: joiners, psk_ids: psk_ids, removes_us: true)
     end
+    # if this commit applied an Update of ours, the UpdatePath below is encrypted to our new leaf key
+    adopt_pending_update!(tree, private_tree)
 
     if commit.path.nil?
       commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
@@ -486,6 +518,20 @@ class Melos::Group
 
   def ensure_active!
     raise Melos::StateError.new("this member was removed from the group in epoch #{@epoch}") unless @active
+  end
+
+  # an Update proposal sent by this member
+  def own_update?(authenticated_content)
+    content = authenticated_content.content
+    content.content_type == Melos::Constants::ContentType::PROPOSAL &&
+      content.proposal.proposal_type == Melos::Constants::ProposalType::UPDATE &&
+      content.sender.sender_type == Melos::Constants::SenderType::MEMBER && content.sender.leaf_index == @leaf_index
+  end
+
+  # 12.1.2: if our leaf in tree now carries the key of an Update we sent, install the private key we kept for it
+  def adopt_pending_update!(tree, private_tree)
+    private_key = @pending_updates[tree.leaf_node_at(@leaf_index)&.encryption_key]
+    private_tree[@leaf_index * 2] = private_key if private_key
   end
 
   # 12.4: a commit's path is required if its proposal list is empty or contains a path-required type

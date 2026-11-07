@@ -49,7 +49,7 @@ Welcome (`GroupSecrets.path_secret` nil, which `from_welcome` already accepts).
 **Test.** Round trip: Alice adds Bob with `path: :if_required`; Bob joins without a path secret and
 can decrypt Alice's next commit; a Remove with `path: :if_required` still produces a path.
 
-## 4. Update proposals (S/M) — RFC 12.1.2, 7.3
+## 4. Update proposals (S/M) — RFC 12.1.2, 7.3 — done
 
 **RFC.** A member replaces its own leaf with a fresh encryption key (`leaf_node_source = update`,
 signed with group id and leaf index). When a commit applies the Update, the member's leaf private
@@ -229,5 +229,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3~~ → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) started as soon as 4 is in,
+~~2 → 1 → 3 → 4~~ → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.
