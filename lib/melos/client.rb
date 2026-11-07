@@ -1,3 +1,4 @@
+require 'securerandom'
 require_relative 'crypto'
 require_relative 'key_package_bundle'
 require_relative 'group'
@@ -6,7 +7,8 @@ require_relative 'struct/structs'
 
 # A client (RFC 9420 Section 5.3): a long-lived identity, i.e. a signature key pair and a
 # credential, plus what a client keeps across groups: the external PSKs it knows (8.4) and the
-# KeyPackages it has published and may still be welcomed into a group with (10).
+# KeyPackages it has published and may still be welcomed into a group with (10), and the
+# resumption PSKs of groups it has replaced (8.6), for groups that resume them.
 class Melos::Client
   attr_reader :cipher_suite, :credential, :external_psks, :key_packages, :groups
 
@@ -17,6 +19,12 @@ class Melos::Client
     @external_psks = {} # psk_id -> psk; shared by reference with the groups this client is in
     @key_packages = {}  # KeyPackageRef -> Melos::KeyPackageBundle, until used to join a group
     @groups = {}        # group_id -> Melos::Group this client created or joined
+    @resumption_psks = {} # [group_id, epoch] -> resumption_psk, of groups no longer in @groups (8.6)
+  end
+
+  # 8.6: the resumption PSK of a group this client is or was in, or nil
+  def resumption_psk(group_id, epoch)
+    @groups[group_id]&.resumption_psks&.[](epoch) || @resumption_psks[[group_id, epoch]]
   end
 
   def signature_private_key
@@ -56,22 +64,55 @@ class Melos::Client
   end
 
   # 11: create a group with this client as its only member.
-  # options are passed to Melos::Group (credential_validator:, max_leaf_node_lifetime:)
+  # options are passed to Melos::Group (credential_validator:, max_leaf_node_lifetime:, ...)
   def create_group(group_id, extensions: [], **options)
     bundle = Melos::KeyPackageBundle.generate(
       @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
     )
     ensure_group_id_free!(group_id)
-    @groups[group_id] = Melos::Group.create(
+    store_group(Melos::Group.create(
       @cipher_suite, group_id, bundle.key_package.leaf_node,
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
-      extensions: extensions, external_psks: @external_psks, **options
-    )
+      extensions: extensions, external_psks: @external_psks, resumption_psk_lookup: method(:resumption_psk), **options
+    ))
+  end
+
+  # 11.2: create the group that replaces old_group after a ReInit was committed in it, with the ReInit's
+  # group_id, cipher suite (this client's) and extensions, and with the same members, given as fresh
+  # KeyPackages of every other member. Returns [new group, Welcome]; the new group is already in epoch 1.
+  #   member_matcher: ->(old_leaf, new_leaf) { true/false }, whether two leaves are the same member
+  def reinit_group(old_group, key_packages, member_matcher: Melos::Group::DEFAULT_MEMBER_MATCHER, **options)
+    reinit = old_group.pending_reinit
+    raise Melos::StateError.new('no ReInit has been committed in this group') if reinit.nil?
+    raise ArgumentError.new("the ReInit is for cipher suite #{reinit.cipher_suite}; use a client of that suite") unless reinit.cipher_suite == @cipher_suite.suite_id
+    raise Melos::UnsupportedError.new("unsupported MLS version #{reinit.version}") unless reinit.version == Melos::Constants::Version::MLS10
+    new_leaves = key_packages.map { leaf_of(_1) } + [own_leaf]
+    old_group.ratchet_tree.each_leaf_node do |old_leaf, _index|
+      next if new_leaves.any? { member_matcher.call(old_leaf, _1) }
+      raise ArgumentError.new('every member of the old group needs a KeyPackage in the new one')
+    end
+    resume(old_group, key_packages, Melos::Constants::ResumptionPSKUsage::REINIT, reinit.group_id, reinit.extensions, options)
+  end
+
+  # 11.3: branch a subgroup of old_group's members, given as fresh KeyPackages, with a new group_id and
+  # the same cipher suite. Returns [new group, Welcome]; the new group is already in epoch 1.
+  def branch_group(old_group, key_packages, group_id:, extensions: old_group.extensions, member_matcher: Melos::Group::DEFAULT_MEMBER_MATCHER, **options)
+    raise ArgumentError.new('a branch keeps the cipher suite of its group') unless old_group.suite.suite_id == @cipher_suite.suite_id
+    old_leaves = []
+    old_group.ratchet_tree.each_leaf_node { |leaf_node, _index| old_leaves << leaf_node }
+    (key_packages.map { leaf_of(_1) } + [own_leaf]).each do |new_leaf|
+      next if old_leaves.any? { member_matcher.call(_1, new_leaf) }
+      raise ArgumentError.new('every member of a branch must be a member of the group it branches from')
+    end
+    resume(old_group, key_packages, Melos::Constants::ResumptionPSKUsage::BRANCH, group_id, extensions, options)
   end
 
   # 12.4.3.1: join the group a Welcome adds us to, using whichever of our KeyPackages it is addressed to.
   # That KeyPackage is then forgotten: its init key is single-use.
-  def join_group(welcome, ratchet_tree: nil, **options)
+  #   resumed_groups: groups held elsewhere (by a client of another cipher suite, say) that a reinit or
+  #                   branch Welcome may resume; this client's own groups are always looked in
+  #   member_matcher: as for #reinit_group, for the checks of 11.2 and 11.3
+  def join_group(welcome, ratchet_tree: nil, resumed_groups: [], member_matcher: Melos::Group::DEFAULT_MEMBER_MATCHER, **options)
     welcome_struct = welcome.is_a?(Melos::Struct::MLSMessage) ? welcome.welcome : welcome
     raise ArgumentError.new('not a Welcome message') if welcome_struct.nil?
     bundle = welcome_struct.secrets.map(&:new_member).filter_map { @key_packages[_1] }.first
@@ -80,11 +121,14 @@ class Melos::Client
       @cipher_suite, welcome,
       key_package: bundle.key_package, init_private_key: bundle.init_private_key,
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
-      external_psks: @external_psks, ratchet_tree: ratchet_tree, **options
+      external_psks: @external_psks, ratchet_tree: ratchet_tree,
+      resumption_psk_lookup: ->(group_id, epoch) { resumed_groups.find { _1.group_id == group_id }&.resumption_psks&.[](epoch) || resumption_psk(group_id, epoch) },
+      resumed_group_lookup: ->(group_id) { resumed_groups.find { _1.group_id == group_id } || @groups[group_id] },
+      member_matcher: member_matcher, **options
     )
     ensure_group_id_free!(group.group_id)
     @key_packages.delete(bundle.ref)
-    @groups[group.group_id] = group
+    store_group(group)
   end
 
   # version of the Hash produced by #to_h
@@ -100,7 +144,8 @@ class Melos::Client
       credential: @credential.raw,
       external_psks: @external_psks.to_a,
       key_packages: @key_packages.map { |ref, bundle| [ref, bundle.to_h] },
-      groups: @groups.map { |group_id, group| [group_id, group.to_h(include_external_psks: false)] }
+      groups: @groups.map { |group_id, group| [group_id, group.to_h(include_external_psks: false)] },
+      resumption_psks: @resumption_psks.map { |(group_id, epoch), psk| [group_id, epoch, psk] }
     }
   end
 
@@ -120,7 +165,45 @@ class Melos::Client
     @credential = Melos::Struct::Credential.new(hash[:credential])
     @external_psks = hash[:external_psks].to_h
     @key_packages = hash[:key_packages].to_h { |ref, bundle| [ref, Melos::KeyPackageBundle.from_h(@cipher_suite, bundle)] }
-    @groups = hash[:groups].to_h { |group_id, group| [group_id, Melos::Group.from_h(group, external_psks: @external_psks, **group_options)] }
+    @groups = hash[:groups].to_h do |group_id, group|
+      [group_id, Melos::Group.from_h(group, external_psks: @external_psks, resumption_psk_lookup: method(:resumption_psk), **group_options)]
+    end
+    @resumption_psks = (hash[:resumption_psks] || []).to_h { |group_id, epoch, psk| [[group_id, epoch], psk] }
+  end
+
+  # a group goes into @groups; one it replaces (removed or reinitialized, see #ensure_group_id_free!)
+  # leaves its resumption PSKs behind for groups that resume it (8.6)
+  def store_group(group)
+    if (replaced = @groups[group.group_id])
+      replaced.resumption_psks.each { |epoch, psk| @resumption_psks[[group.group_id, epoch]] = psk }
+    end
+    @groups[group.group_id] = group
+  end
+
+  # 11.2, 11.3: a new group of this client resuming old_group: created in epoch 0, then a first commit adding
+  # key_packages with the resumption PSK of old_group's current epoch, merged at once
+  def resume(old_group, key_packages, usage, group_id, extensions, options)
+    psk_id = Melos::Struct::PreSharedKeyID.create_resumption(
+      usage: usage, psk_group_id: old_group.group_id, psk_epoch: old_group.epoch, psk_nonce: SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
+    )
+    psk = old_group.resumption_psks.fetch(old_group.epoch)
+    commit_options = options.slice(:wire_format, :include_ratchet_tree)
+    group = create_group(group_id, extensions: extensions, **options.except(:wire_format, :include_ratchet_tree))
+    result = group.send(:create_resumption_commit, key_packages, psk_id, psk, **commit_options)
+    group.merge_commit(result.staged)
+    [group, result.welcome]
+  end
+
+  def leaf_of(key_package)
+    (key_package.is_a?(Melos::Struct::MLSMessage) ? key_package.key_package : key_package).leaf_node
+  end
+
+  # a leaf standing for this client, for the membership checks of #reinit_group and #branch_group
+  def own_leaf
+    Melos::Struct::LeafNode.create(
+      encryption_key: '', signature_key: signature_public_key, credential: @credential, capabilities: nil,
+      leaf_node_source: nil, lifetime: nil, parent_hash: nil, extensions: [], signature: nil
+    )
   end
 
   # 12.4.3: a group_id MUST be unique among the groups this client is participating in;

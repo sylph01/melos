@@ -6,7 +6,7 @@ mapped to the code; updated as validation lands (last: tier 5). Status:
 - **done**: enforced today, with where.
 - **partial**: enforced in some paths or weaker than the RFC asks.
 - **missing**: not enforced.
-- **n/a**: for features melos does not implement yet (external commits, ReInit, branching); the code rejects these inputs with a clear error instead.
+- **n/a**: for features melos does not implement yet (external commits); the code rejects these inputs with a clear error instead.
 
 Items marked *(application)* are MUSTs the RFC places on the application or the Authentication
 Service; melos should offer a hook or a documented default, not decide the policy.
@@ -37,8 +37,8 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 2.3 | Update: LeafNode valid for an Update per 7.3, source `update`, encryption_key differs from the replaced leaf | 12.1.2, 7.3 | done | `#apply_proposals` -> `#validate_leaf_node!(context: :update)`; sent by `#create_update_proposal` |
 | 2.4 | Remove: `removed` MUST be a non-blank leaf | 12.1.3 | done | `#apply_proposals` (both sides), `#create_remove_proposal` |
 | 2.5 | PreSharedKey: psk_nonce length MUST be KDF.Nh | 12.1.4 | done | `#psk_secret_for` |
-| 2.6 | PreSharedKey: resumption with usage reinit or branch is invalid outside those operations | 12.1.4, 11.2, 11.3 | **missing** | `#psk_secret_for` looks up any resumption PSK by epoch regardless of usage |
-| 2.7 | ReInit: version MUST NOT be lower than the current one | 12.1.5 | n/a | ReInit rejected as unsupported |
+| 2.6 | PreSharedKey: resumption with usage reinit or branch is invalid outside those operations | 12.1.4, 11.2, 11.3 | done | `#psk_secret_for` accepts them only in the initial commit of a resumed group (`#create_resumption_commit`), which no other member processes |
+| 2.7 | ReInit: version MUST NOT be lower than the current one | 12.1.5 | done | `#validate_proposal_list!` |
 | 2.8 | GroupContextExtensions: invalid if required_capabilities not supported by all members after the commit | 12.1.7, 11.1 | done | `#validate_members!` after the list is applied |
 | 2.9 | External proposals MUST be PublicMessage; only add, remove, psk, reinit, gce from external senders; external_senders extension must be present; unauthorized external proposals are invalid | 12.1.8 | done | `#validate_non_member_content!`, `#sender_signature_key`; authorization is the `external_proposal_validator:` hook *(application)*, accepting by default |
 | 2.10 | Unknown (non-default) proposal types MUST be supported by every member that processes the commit | 12.2, 13.2 | done | `#apply_proposals` rejects any type outside `KNOWN_PROPOSAL_TYPES` |
@@ -57,7 +57,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 3.6 | No Add of a client already in the group unless a Remove in the same list removes it | 12.2 | done (same signature key) |
 | 3.7 | No two PreSharedKey proposals with the same PreSharedKeyID | 12.2 | done |
 | 3.8 | At most one GroupContextExtensions proposal | 12.2 | done |
-| 3.9 | ReInit MUST be alone in the list | 12.2 | n/a (ReInit rejected) |
+| 3.9 | ReInit MUST be alone in the list | 12.2 | done (`#create_commit` also leaves a pending ReInit out when other proposals are at hand, as 12.2 suggests) |
 | 3.10 | No ExternalInit in a regular commit | 12.2 | done by accident (`#apply_proposals` raises "unsupported") |
 | 3.11 | After applying, every leaf in the tree is valid per 7.3 | 12.2 | done: capabilities and key uniqueness of every remaining leaf (`#validate_members!`); signatures were verified when each leaf entered |
 | 3.12 | Reject the Commit if the list is invalid | 12.2 | follows from the above |
@@ -108,7 +108,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 | 6.9 | Each UpdatePathNode's encrypted_path_secret length MUST equal the copath resolution excluding new leaves | 7.6 | done | `#validate_update_path!` checks every node |
 | 6.10 | Confirmation tag verifies against the new epoch | 12.4.2 | done | `Group#stage` |
 | 6.11 | A Commit that removes us: no further sending, delete state (SHOULD) | 12.4.2 | done | `#stage` returns `removes_us`, `#merge_commit` makes the group inactive; last epoch's secrets are kept for late messages |
-| 6.12 | After a ReInit commit the group MUST NOT be used; wait for the Welcome | 12.4.2 | n/a | ReInit rejected |
+| 6.12 | After a ReInit commit the group MUST NOT be used; wait for the Welcome | 12.4.2 | done | `#merge_commit` makes the group inactive with `pending_reinit`; `Client#reinit_group` creates the successor |
 | 6.13 | A member that observed proposals MUST commit before sending application data | 12.4 | done | `#create_application_message` |
 | 6.14 | Generating a Commit MUST NOT modify state; Welcome MUST NOT be delivered until the Commit is accepted | 14 | done / *(application)* | `#create_commit` returns a `StagedCommit`; delivery is the caller's |
 | 6.15 | After processing a path, outdated key material MUST be deleted | 7.5, 9.2 | done | `EpochSecrets#discard_consumed!`, `PrivateTree#prune!` in `#merge_commit`; retained past epochs keep only their secret tree and sender data secret. Ruby cannot zeroize strings |
@@ -119,7 +119,7 @@ Service; melos should offer a hook or a documented default, not decide the polic
 |---|---|---|---|---|
 | 7.1 | Find the entry for one of our KeyPackages; error if none or if cipher suites differ | 12.4.3.1 | done | `Client#join_group` finds the entry; `Group.from_welcome` compares the KeyPackage's cipher_suite with the Welcome's |
 | 7.2 | Error if a PSK in GroupSecrets is unknown | 12.4.3.1 | done | `Group.from_welcome` |
-| 7.3 | A resumption PSK with usage reinit or branch MUST be the only such PSK; GroupInfo epoch MUST be 1; reinit/branch consistency checks | 12.4.3.1, 11.2, 11.3 | n/a | resumption PSKs in a Welcome rejected as unsupported |
+| 7.3 | A resumption PSK with usage reinit or branch MUST be the only such PSK; GroupInfo epoch MUST be 1; reinit/branch consistency checks | 12.4.3.1, 11.2, 11.3 | done | `Group.from_welcome`, `#validate_resumption!`; "same member" is the `member_matcher:` hook *(application)*, identical credentials by default; branch membership is checked against the old group's current tree |
 | 7.4 | GroupInfo signature with the signer leaf's key; error if blank or invalid | 12.4.3 | done | `Group.from_welcome` |
 | 7.5 | group_id MUST be unique among the groups the client is in | 12.4.3 | done | `Client#ensure_group_id_free!` on create and join |
 | 7.6 | GroupInfo cipher_suite matches the KeyPackage's | 12.4.3.1 | done | see 7.1 |
@@ -164,4 +164,4 @@ Service; melos should offer a hook or a documented default, not decide the polic
 3. ~~**KeyPackage and LeafNode validation**: sections 4 and 5 as one `LeafNode` validator parameterized by context (key_package / update / commit / tree), used by Add processing, commit path processing and join; includes signature, source, extension and capability checks, key uniqueness. Credential validation and maximum lifetime become hooks with defaults.~~ Done.
 4. ~~**Join integrity**: 7.8 to 7.12 and 7.14 on top of the validator from step 3.~~ Done.
 5. ~~**Client-level**: 7.5 group_id uniqueness, 7.1 KeyPackage suite check.~~ Done.
-6. **Later, with the features they belong to**: ~~external senders (1.2, 2.9)~~, resumption PSK rules (2.6, 7.3), ReInit, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.
+6. **Later, with the features they belong to**: ~~external senders (1.2, 2.9)~~, ~~resumption PSK rules (2.6, 7.3), ReInit~~, external commits, ~~old-epoch application messages (1.10), deletion schedule (6.15)~~.

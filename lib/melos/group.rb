@@ -19,9 +19,10 @@ class Melos::Group
   # 12.4.2: the state of the next epoch, computed from a Commit but not yet in effect.
   # It is produced by #stage_commit (received commits) or #create_commit (our own) and applied by #merge_commit.
   # removes_us: the Commit removed this member; only ratchet_tree, extensions, joiners and psk_ids are then set
+  # reinit: the ReInit the Commit covers (12.1.5), which ends the group once merged
   StagedCommit = Struct.new(
     :ratchet_tree, :private_tree, :extensions, :confirmed_transcript_hash, :interim_transcript_hash,
-    :epoch_secrets, :group_context, :confirmation_tag, :joiners, :path_secrets, :psk_ids, :removes_us,
+    :epoch_secrets, :group_context, :confirmation_tag, :joiners, :path_secrets, :psk_ids, :removes_us, :reinit,
     keyword_init: true
   )
 
@@ -53,11 +54,19 @@ class Melos::Group
   # policy. The default accepts every proposal that passes the protocol's own checks.
   DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR = ->(_authenticated_content) { true }
 
+  # 8.6: how many epochs' resumption PSKs a group keeps
+  DEFAULT_MAX_RESUMPTION_PSKS = 32
+
+  # 11.2, 11.3: whether two leaves (one in an old group, one in a group resumed from it) are the same
+  # member is the application's call; by default, when their credentials are identical
+  DEFAULT_MEMBER_MATCHER = ->(old_leaf, new_leaf) { old_leaf.credential.raw == new_leaf.credential.raw }
+
   # the options of .create and .from_welcome that configure the secret tree's ratchets (Melos::SecretTree)
   SECRET_TREE_OPTIONS = %i[max_forward_distance out_of_order_tolerance].freeze
 
   attr_reader :suite, :group_id, :epoch, :leaf_index, :ratchet_tree, :private_tree, :extensions,
-              :confirmed_transcript_hash, :interim_transcript_hash, :epoch_secrets, :resumption_psks, :external_psks
+              :confirmed_transcript_hash, :interim_transcript_hash, :epoch_secrets, :resumption_psks, :external_psks,
+              :pending_reinit
 
   # Use .create or .from_welcome rather than calling this directly.
   #   credential_validator: ->(credential, leaf_node) { true/false }, the application's Authentication Service check (5.3.1);
@@ -66,12 +75,15 @@ class Melos::Group
   #   max_past_epochs: how many earlier epochs still accept application messages (15.3); 0 for none
   #   external_proposal_validator: ->(authenticated_content) { true/false }, whether a proposal from an
   #                                external sender or a new member is authorized (12.1.8)
+  #   resumption_psk_lookup: ->(group_id, epoch) { psk or nil }, the resumption PSKs of other groups (8.6); Melos::Client supplies it
+  #   max_resumption_psks: how many epochs' resumption PSKs of this group are kept (8.6)
   # .create and .from_welcome also take max_forward_distance: and out_of_order_tolerance: for the
   # secret tree's ratchets (Melos::SecretTree); epochs created by commits inherit them.
   def initialize(suite:, group_id:, epoch:, leaf_index:, signature_private_key:, ratchet_tree:, private_tree:,
                  extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {},
                  credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME,
-                 max_past_epochs: DEFAULT_MAX_PAST_EPOCHS, external_proposal_validator: DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR)
+                 max_past_epochs: DEFAULT_MAX_PAST_EPOCHS, external_proposal_validator: DEFAULT_EXTERNAL_PROPOSAL_VALIDATOR,
+                 resumption_psk_lookup: nil, max_resumption_psks: DEFAULT_MAX_RESUMPTION_PSKS)
     @suite = suite
     @group_id = group_id
     @epoch = epoch
@@ -88,16 +100,21 @@ class Melos::Group
     @max_leaf_node_lifetime = max_leaf_node_lifetime
     @max_past_epochs = max_past_epochs
     @external_proposal_validator = external_proposal_validator
+    @resumption_psk_lookup = resumption_psk_lookup
+    @max_resumption_psks = max_resumption_psks
     @past_epochs = {} # epoch -> PastEpoch, for late application messages (9.1, 15.3)
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @pending_updates = {}   # encryption_key -> private key, for Update proposals we sent this epoch (12.1.2)
     @group_context = nil
-    @active = true # false once a Commit has removed this member (12.4.2)
+    @active = true # false once a Commit has removed this member (12.4.2) or reinitialized the group (12.1.5)
+    @pending_reinit = nil # the ReInit of the last Commit, once merged
+    @resumption_override = nil # [PreSharedKeyID.raw, psk] allowed in the initial commit of a reinit or branch
   end
 
-  # false after a Commit removed this member: it can no longer send or follow the group,
-  # though #unprotect still works for late messages of the last epoch it was in
+  # false after a Commit removed this member or covered a ReInit: it can no longer send or follow the
+  # group, though #unprotect still works for late messages of the last epoch it was in. After a ReInit,
+  # #pending_reinit holds the parameters of the group that replaces this one (Melos::Client#reinit_group).
   def active?
     @active
   end
@@ -139,8 +156,13 @@ class Melos::Group
   #   init_private_key, encryption_private_key: private keys of the KeyPackage's init_key and leaf encryption_key
   #   external_psks: psk_id -> psk, for any external PSKs the Welcome references
   #   ratchet_tree: serialized tree, if it was delivered outside the Welcome's ratchet_tree extension
+  #   resumption_psk_lookup: ->(group_id, epoch) { psk or nil }, for resumption PSKs the Welcome references
+  #   resumed_group_lookup: ->(group_id) { Melos::Group or nil }, the group a reinit or branch Welcome resumes
+  #                         (11.2, 11.3): it is checked against the new group
+  #   member_matcher: ->(old_leaf, new_leaf) { true/false }, whether two leaves are the same member, for those checks
   def self.from_welcome(suite, welcome, key_package:, init_private_key:, encryption_private_key:, signature_private_key:,
-                        external_psks: {}, ratchet_tree: nil, **options)
+                        external_psks: {}, ratchet_tree: nil, resumption_psk_lookup: nil, resumed_group_lookup: nil,
+                        member_matcher: DEFAULT_MEMBER_MATCHER, **options)
     secret_tree_options = options.slice(*SECRET_TREE_OPTIONS)
     options = options.except(*SECRET_TREE_OPTIONS)
     if welcome.is_a?(Melos::Struct::MLSMessage)
@@ -164,11 +186,22 @@ class Melos::Group
       )
     )
 
-    # 8.4: the PSKs named in GroupSecrets
-    # TODO: resumption PSKs in a Welcome (reinit, branch)
+    # 8.4: the PSKs named in GroupSecrets; 12.4.3.1: at most one of them links to a reinitialized or branched group
+    resumed_psk_ids = group_secrets.psks.select(&:reinit_or_branch?)
+    raise Melos::ProtocolError.new('Welcome has more than one reinit or branch resumption PSK') if resumed_psk_ids.size > 1
     psks = group_secrets.psks.map do |psk_id|
-      raise Melos::UnsupportedError.new('unsupported PSK type in Welcome') unless psk_id.psktype == Melos::Constants::PSKType::EXTERNAL
-      [psk_id.raw, external_psks.fetch(psk_id.psk_id) { raise Melos::StateError.new('Welcome references an unknown external PSK') }]
+      value =
+        case psk_id.psktype
+        when Melos::Constants::PSKType::EXTERNAL
+          external_psks.fetch(psk_id.psk_id) { raise Melos::StateError.new('Welcome references an unknown external PSK') }
+        when Melos::Constants::PSKType::RESUMPTION
+          check_resumption_usage!(psk_id)
+          resumption_psk_lookup&.call(psk_id.psk_group_id, psk_id.psk_epoch) or
+            raise Melos::StateError.new("Welcome references an unknown resumption PSK (epoch #{psk_id.psk_epoch})")
+        else
+          raise Melos::ProtocolError.new("unknown PSK type #{psk_id.psktype}")
+        end
+      [psk_id.raw, value]
     end
     psk_secret = Melos::PSK.psk_secret(suite, psks)
 
@@ -216,11 +249,21 @@ class Melos::Group
       signature_private_key: signature_private_key, ratchet_tree: tree, private_tree: private_tree,
       extensions: group_context.extensions, confirmed_transcript_hash: group_context.confirmed_transcript_hash,
       interim_transcript_hash: interim_transcript_hash(suite, group_context.confirmed_transcript_hash, group_info.confirmation_tag),
-      epoch_secrets: epoch_secrets, external_psks: external_psks, **options
+      epoch_secrets: epoch_secrets, external_psks: external_psks, resumption_psk_lookup: resumption_psk_lookup, **options
     )
     group.send(:validate_joined_state!)
+    unless resumed_psk_ids.empty?
+      group.send(:validate_resumption!, resumed_psk_ids.first, resumed_group_lookup&.call(resumed_psk_ids.first.psk_group_id), member_matcher)
+    end
     epoch_secrets.discard_consumed! # 9.2: the joiner secret has done its work
     group
+  end
+
+  # 8.4: a resumption PSK's usage must be one of the defined values
+  def self.check_resumption_usage!(psk_id)
+    return if [Melos::Constants::ResumptionPSKUsage::APPLICATION, Melos::Constants::ResumptionPSKUsage::REINIT,
+               Melos::Constants::ResumptionPSKUsage::BRANCH].include?(psk_id.usage)
+    raise Melos::ProtocolError.new("unknown resumption PSK usage #{psk_id.usage}")
   end
 
   # 8.2: interim_transcript_hash = Hash(confirmed_transcript_hash || InterimTranscriptHashInput)
@@ -272,14 +315,14 @@ class Melos::Group
       past_epochs: @past_epochs.map do |epoch, past|
         [epoch, { epoch_secrets: past.epoch_secrets.to_h, group_context: past.group_context.raw, ratchet_tree: past.ratchet_tree.raw }]
       end,
-      active: @active,
-      max_leaf_node_lifetime: @max_leaf_node_lifetime, max_past_epochs: @max_past_epochs
+      active: @active, pending_reinit: @pending_reinit&.raw,
+      max_leaf_node_lifetime: @max_leaf_node_lifetime, max_past_epochs: @max_past_epochs, max_resumption_psks: @max_resumption_psks
     }
   end
 
   # A group from #to_h.
   #   external_psks: the Hash to share with the restored group (a Client passes its own); defaults to the saved ones
-  #   options: credential_validator:, external_proposal_validator:, as for .create
+  #   options: credential_validator:, external_proposal_validator:, resumption_psk_lookup:, as for .create
   def self.from_h(hash, external_psks: nil, **options)
     raise ArgumentError.new("unknown group state format #{hash[:format]}") unless hash[:format] == STATE_FORMAT
     suite = Melos::Crypto::CipherSuite.new(hash[:cipher_suite])
@@ -291,7 +334,8 @@ class Melos::Group
       confirmed_transcript_hash: hash[:confirmed_transcript_hash], interim_transcript_hash: hash[:interim_transcript_hash],
       epoch_secrets: Melos::EpochSecrets.from_h(suite, hash[:epoch_secrets]),
       external_psks: external_psks || (hash[:external_psks] || []).to_h,
-      max_leaf_node_lifetime: hash[:max_leaf_node_lifetime], max_past_epochs: hash[:max_past_epochs], **options
+      max_leaf_node_lifetime: hash[:max_leaf_node_lifetime], max_past_epochs: hash[:max_past_epochs],
+      max_resumption_psks: hash[:max_resumption_psks], **options
     )
     group.send(:restore_state, hash)
     group
@@ -399,6 +443,12 @@ class Melos::Group
     @pending_proposals = {}
     @pending_updates = {}
     @resumption_psks[@epoch] = @epoch_secrets.resumption_psk
+    @resumption_psks.delete_if { |epoch, _| epoch <= @epoch - @max_resumption_psks } # 8.6
+    # 12.4.2: after a ReInit the group is not used any more; the members wait for the new group's Welcome
+    if staged.reinit
+      @pending_reinit = staged.reinit
+      @active = false
+    end
     self
   end
 
@@ -481,6 +531,23 @@ class Melos::Group
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: psk), **options)
   end
 
+  # 8.6, 12.1.4: inject the resumption_psk of an earlier epoch of this group (or, with group_id:, of another
+  # group whose PSKs this member can look up) with usage application
+  def create_resumption_psk_proposal(epoch, group_id: @group_id, **options)
+    raise ArgumentError.new("no resumption PSK for epoch #{epoch}") if resumption_psk(group_id, epoch).nil?
+    psk_id = Melos::Struct::PreSharedKeyID.create_resumption(
+      usage: Melos::Constants::ResumptionPSKUsage::APPLICATION, psk_group_id: group_id, psk_epoch: epoch, psk_nonce: SecureRandom.random_bytes(@suite.kdf.n_h)
+    )
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: Melos::Struct::PreSharedKey.create(psk: psk_id)), **options)
+  end
+
+  # 12.1.5: propose reinitializing the group with new parameters (by default the current ones, to restart
+  # it). Once a commit covering it is merged, the group is inactive and Melos::Client#reinit_group creates the successor.
+  def create_reinit_proposal(group_id: @group_id, cipher_suite: @suite.suite_id, extensions: @extensions, version: Melos::Constants::Version::MLS10, **options)
+    reinit = Melos::Struct::ReInit.create(group_id: group_id, version: version, cipher_suite: cipher_suite, extensions: extensions)
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::REINIT, reinit: reinit), **options)
+  end
+
   # 12.4: commit the proposals of this epoch (those sent or received, by reference, plus inline_proposals by value).
   # Returns a CommitResult; call #merge_commit(result.staged) once the Delivery Service has accepted the commit,
   # and send result.welcome to the new members if there are any.
@@ -492,6 +559,12 @@ class Melos::Group
     raise ArgumentError.new('path must be :always or :if_required') unless %i[always if_required].include?(path)
     # 12.2: a commit must not include an Update from the committer, so ours are left out (the path replaces our leaf)
     referenced = @pending_proposals.reject { |_ref, authenticated_content| own_update?(authenticated_content) }
+    # 12.2: a ReInit must be alone; with other proposals at hand, those are committed and the ReInit can be sent again later
+    reinit = ->(proposal) { proposal.proposal_type == Melos::Constants::ProposalType::REINIT }
+    others = referenced.values.map { _1.content.proposal } + inline_proposals
+    if others.any? { !reinit.(_1) } && others.any?(&reinit)
+      referenced = referenced.reject { |_ref, authenticated_content| reinit.(authenticated_content.content.proposal) }
+    end
     proposal_or_refs =
       referenced.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
       inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
@@ -624,6 +697,7 @@ class Melos::Group
     end
 
     StagedCommit.new(
+      reinit: proposals.find { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::REINIT }&.first&.reinit,
       ratchet_tree: tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: confirmed_transcript_hash,
       interim_transcript_hash: self.class.interim_transcript_hash(@suite, confirmed_transcript_hash, confirmation_tag),
@@ -656,10 +730,13 @@ class Melos::Group
       )]
     end
     @active = hash[:active]
+    @pending_reinit = hash[:pending_reinit] && Melos::Struct::ReInit.new(hash[:pending_reinit])
   end
 
   def ensure_active!
-    raise Melos::StateError.new("this member was removed from the group in epoch #{@epoch}") unless @active
+    return if @active
+    raise Melos::StateError.new("the group was reinitialized in epoch #{@epoch}; join its successor") if @pending_reinit
+    raise Melos::StateError.new("this member was removed from the group in epoch #{@epoch}")
   end
 
   # an Update proposal sent by this member
@@ -750,7 +827,7 @@ class Melos::Group
     # 12.2, 13.2: a proposal type not supported by every member makes the list invalid; we support only the RFC's own types
     unknown = types - KNOWN_PROPOSAL_TYPES
     raise Melos::UnsupportedError.new("unknown proposal types: #{unknown.map { '0x%04x' % _1 }.join(', ')}") unless unknown.empty?
-    unsupported = types & [Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT]
+    unsupported = types & [Melos::Constants::ProposalType::EXTERNAL_INIT]
     raise Melos::UnsupportedError.new("unsupported proposal types: #{unsupported.map { Melos::Constants::ProposalType::NAMES[_1] }.join(', ')}") unless unsupported.empty?
     extensions = @extensions
     of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS).each do |proposal, _sender|
@@ -793,12 +870,45 @@ class Melos::Group
         when Melos::Constants::PSKType::EXTERNAL
           @external_psks.fetch(psk_id.psk_id) { raise Melos::StateError.new('commit references an unknown external PSK') }
         when Melos::Constants::PSKType::RESUMPTION
-          # TODO: check psk_group_id and usage
-          @resumption_psks.fetch(psk_id.psk_epoch) { raise Melos::StateError.new("no resumption PSK for epoch #{psk_id.psk_epoch}") }
+          self.class.check_resumption_usage!(psk_id)
+          if psk_id.reinit_or_branch?
+            # 11.2, 11.3, 12.1.4: only in the initial commit of a reinitialized or branched group, which no other member processes
+            raise Melos::ProtocolError.new('a PreSharedKey proposal must not use a reinit or branch resumption PSK') unless @resumption_override&.first == psk_id.raw
+            @resumption_override.last
+          else
+            resumption_psk(psk_id.psk_group_id, psk_id.psk_epoch) or
+              raise Melos::StateError.new("no resumption PSK for epoch #{psk_id.psk_epoch} of that group")
+          end
+        else
+          raise Melos::ProtocolError.new("unknown PSK type #{psk_id.psktype}")
         end
       [psk_id.raw, value]
     end
     Melos::PSK.psk_secret(@suite, psks)
+  end
+
+  # 8.6: the resumption_psk of an epoch of this group or, through resumption_psk_lookup, of another
+  def resumption_psk(group_id, epoch)
+    group_id == @group_id ? @resumption_psks[epoch] : @resumption_psk_lookup&.call(group_id, epoch)
+  end
+
+  # 11.2, 11.3: the first commit of a group created to reinitialize or branch another: it adds key_packages
+  # and carries the resumption PSK psk_id (whose value is psk) that ties the new group to the old one.
+  # Only a group in epoch 0 with no other member can do this, since nobody else processes the commit.
+  # Returns the CommitResult; the caller merges it right away.
+  def create_resumption_commit(key_packages, psk_id, psk, **options)
+    raise ArgumentError.new('a resumption commit is the first commit of a new group') unless @epoch.zero? && @ratchet_tree.n_leaves == 1
+    raise ArgumentError.new('proposals are pending') unless @pending_proposals.empty?
+    adds = key_packages.map do |key_package|
+      key_package = key_package.key_package if key_package.is_a?(Melos::Struct::MLSMessage)
+      validate_key_package!(key_package, tree: @ratchet_tree, leaf_index: nil, extensions: @extensions, sending: true)
+      Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: Melos::Struct::Add.create(key_package: key_package))
+    end
+    psk_proposal = Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: Melos::Struct::PreSharedKey.create(psk: psk_id))
+    @resumption_override = [psk_id.raw, psk]
+    create_commit(inline_proposals: adds + [psk_proposal], **options)
+  ensure
+    @resumption_override = nil
   end
 
   # 6: FramedContent -> AuthenticatedContent, signed with our key in the current GroupContext

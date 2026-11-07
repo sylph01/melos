@@ -41,7 +41,44 @@ class Melos::Group
     psk_ids = psks.map { |proposal, _sender| proposal.psk.psk.raw }
     raise Melos::ProtocolError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
     raise Melos::ProtocolError.new('more than one GroupContextExtensions proposal') if gces.size > 1
-    # ReInit must be alone and ExternalInit must be absent (12.2); both are rejected as unsupported in apply_proposals
+
+    reinits = of_type.(Melos::Constants::ProposalType::REINIT)
+    raise Melos::ProtocolError.new('a ReInit proposal must be the only proposal of its commit') if reinits.any? && proposals.size > 1
+    reinits.each do |proposal, _sender|
+      # 12.1.5: a ReInit must not go to a lower version
+      raise Melos::ProtocolError.new("ReInit to version #{proposal.reinit.version}, lower than the group's") if proposal.reinit.version < Melos::Constants::Version::MLS10
+      Melos::Struct::Extension.check_unique_types!(proposal.reinit.extensions, 'ReInit extensions')
+    end
+    # ExternalInit must be absent (12.2); it is rejected as unsupported in apply_proposals
+  end
+
+  # 11.2, 11.3, 12.4.3.1: a group joined with a reinit or branch resumption PSK (psk_id) is checked against
+  # the group it resumes (old_group): epoch 1, the ReInit's parameters or the old group's suite, and the membership
+  def validate_resumption!(psk_id, old_group, member_matcher)
+    raise Melos::StateError.new('the group this Welcome resumes is not known') if old_group.nil?
+    raise Melos::ProtocolError.new("a resumed group must start in epoch 1, not #{@epoch}") unless @epoch == 1
+    old_leaves = []
+    old_group.ratchet_tree.each_leaf_node { |leaf_node, _index| old_leaves << leaf_node }
+    new_leaves = []
+    @ratchet_tree.each_leaf_node { |leaf_node, _index| new_leaves << leaf_node }
+    case psk_id.usage
+    when Melos::Constants::ResumptionPSKUsage::REINIT
+      reinit = old_group.pending_reinit
+      raise Melos::ProtocolError.new('the resumed group was not reinitialized') if reinit.nil?
+      raise Melos::ProtocolError.new('the reinit PSK is not from the epoch the ReInit was committed in') unless psk_id.psk_epoch == old_group.epoch
+      raise Melos::ProtocolError.new('group_id differs from the ReInit') unless @group_id == reinit.group_id
+      raise Melos::ProtocolError.new('version differs from the ReInit') unless group_context.version == reinit.version
+      raise Melos::ProtocolError.new('cipher suite differs from the ReInit') unless @suite.suite_id == reinit.cipher_suite
+      raise Melos::ProtocolError.new('extensions differ from the ReInit') unless @extensions.map(&:raw) == reinit.extensions.map(&:raw)
+      # every member of the old group is in the new one
+      missing = old_leaves.reject { |old| new_leaves.any? { member_matcher.call(old, _1) } }
+      raise Melos::ProtocolError.new('a member of the reinitialized group is missing from the new group') unless missing.empty?
+    when Melos::Constants::ResumptionPSKUsage::BRANCH
+      raise Melos::ProtocolError.new('a branch must keep the cipher suite of its group') unless @suite.suite_id == old_group.suite.suite_id
+      # every member of the new group was in the old one
+      extra = new_leaves.reject { |new| old_leaves.any? { member_matcher.call(_1, new) } }
+      raise Melos::ProtocolError.new('a member of the branch is not in the group it branches from') unless extra.empty?
+    end
   end
 
   # 12.4.2, 7.6, 7.9.2: a received UpdatePath, checked against the tree after the proposals and before the merge

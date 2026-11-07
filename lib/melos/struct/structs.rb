@@ -350,6 +350,26 @@ class Melos::Struct::PreSharedKeyID < Melos::Struct::Base
     new_instance.instance_variable_set(:@psk_nonce, psk_nonce)
     new_instance
   end
+
+  # 8.4, 8.6: the resumption_psk of group psk_group_id at psk_epoch; usage is a Melos::Constants::ResumptionPSKUsage
+  def self.create_resumption(usage:, psk_group_id:, psk_epoch:, psk_nonce:)
+    new_instance = self.allocate
+    new_instance.instance_variable_set(:@psktype, Melos::Constants::PSKType::RESUMPTION)
+    new_instance.instance_variable_set(:@usage, usage)
+    new_instance.instance_variable_set(:@psk_group_id, psk_group_id)
+    new_instance.instance_variable_set(:@psk_epoch, psk_epoch)
+    new_instance.instance_variable_set(:@psk_nonce, psk_nonce)
+    new_instance
+  end
+
+  def resumption?
+    @psktype == Melos::Constants::PSKType::RESUMPTION
+  end
+
+  # 11.2, 11.3: a resumption PSK that links a reinitialized or branched group to its origin
+  def reinit_or_branch?
+    resumption? && [Melos::Constants::ResumptionPSKUsage::REINIT, Melos::Constants::ResumptionPSKUsage::BRANCH].include?(@usage)
+  end
 end
 
 class Melos::Struct::PSKLabel < Melos::Struct::Base

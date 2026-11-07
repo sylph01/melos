@@ -188,7 +188,7 @@ credential type 2 only when the validator is installed.
 **Test.** A self-signed chain generated in the test; a certificate whose key differs from the leaf's
 is rejected.
 
-## 10. Resumption PSKs, ReInit and subgroup branching (M/L) — RFC 8.4, 11.2, 11.3, 12.1.5, 12.4.3.1
+## 10. Resumption PSKs, ReInit and subgroup branching (M/L) — RFC 8.4, 11.2, 11.3, 12.1.5, 12.4.3.1 — done
 
 **RFC.** ReInit: a proposal (alone in its commit) ends the group; the committer creates a new group
 with the proposed version, suite, id and extensions, and welcomes everyone with a resumption PSK of
@@ -211,6 +211,18 @@ only Adds and a PSK) and benefits from 2.
 
 **Test.** Reinit a three-member group to another cipher suite; branch Alice and Carol out of
 Alice, Bob and Carol; a `reinit` PSK in an ordinary commit is rejected.
+
+**Done as.** `PreSharedKeyID.create_resumption`; `Group#create_resumption_psk_proposal` (usage
+application, this group or another the client knows), `#create_reinit_proposal`; a merged ReInit
+sets `pending_reinit` and makes the group inactive. `Client#reinit_group(old_group, key_packages)`
+(on a client of the ReInit's suite) and `Client#branch_group(old_group, key_packages, group_id:)`
+create the new group in epoch 0 and make its first commit, with the Adds and the reinit/branch PSK
+(`Group#create_resumption_commit`, the only place such a PSK is accepted). `Group.from_welcome` takes
+`resumption_psk_lookup:`, `resumed_group_lookup:` and `member_matcher:` (identical credentials by
+default) and runs the 11.2, 11.3 and 12.4.3.1 checks; `Client#join_group` supplies them, with
+`resumed_groups:` for old groups held by a client of another suite. A client archives the resumption
+PSKs of a group it replaces; groups keep `max_resumption_psks:` epochs (default 32, 8.6). Branch
+membership is checked against the old group's current tree. Tests in `test/test_resumption.rb`.
 
 ## 11. External commits (L) — RFC 12.4.3.2, 8.3, 12.1.6
 
@@ -253,5 +265,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8~~ → 10 → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10~~ → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.
