@@ -339,12 +339,15 @@ class Melos::Group
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: psk), **options)
   end
 
-  # 12.4: commit the proposals of this epoch (those sent or received, by reference, plus inline_proposals by value)
-  # with a fresh UpdatePath. Returns a CommitResult; call #merge_commit(result.staged) once the Delivery Service
-  # has accepted the commit, and send result.welcome to the new members if there are any.
+  # 12.4: commit the proposals of this epoch (those sent or received, by reference, plus inline_proposals by value).
+  # Returns a CommitResult; call #merge_commit(result.staged) once the Delivery Service has accepted the commit,
+  # and send result.welcome to the new members if there are any.
+  #   path: :always includes a fresh UpdatePath (post-compromise security for the committer);
+  #         :if_required leaves it out when 12.4 allows, i.e. the list is non-empty and has no path-required proposal
   def create_commit(inline_proposals: [], wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, authenticated_data: '',
-                    padding_size: 0, include_ratchet_tree: true)
+                    padding_size: 0, include_ratchet_tree: true, path: :always)
     ensure_active!
+    raise ArgumentError.new('path must be :always or :if_required') unless %i[always if_required].include?(path)
     proposal_or_refs =
       @pending_proposals.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
       inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
@@ -355,16 +358,22 @@ class Melos::Group
     tree = @ratchet_tree.dup
     private_tree = @private_tree.dup
     extensions, joiners, _psk_ids = apply_proposals(tree, proposals, sending: true)
-    # TODO: the path may be left out when 12.4 does not require it
-    provisional_group_context = Melos::Struct::GroupContext.create(
-      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
-      tree_hash: '', confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions # tree_hash is filled in by create_update_path
-    )
-    path = tree.create_update_path(private_tree, @leaf_index, @signature_private_key, provisional_group_context, joiners.map { _1.leaf_index * 2 })
+    if path == :always || path_required?(proposals)
+      provisional_group_context = Melos::Struct::GroupContext.create(
+        cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
+        tree_hash: '', confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions # tree_hash is filled in by create_update_path
+      )
+      update = tree.create_update_path(private_tree, @leaf_index, @signature_private_key, provisional_group_context, joiners.map { _1.leaf_index * 2 })
+      own_path = { private_tree: private_tree, commit_secret: update[:commit_secret], path_secrets: update[:path_secrets] }
+    else
+      # 12.4.1: no path, so the commit secret is all zeros and our keys stay as they are
+      update = { update_path: nil }
+      own_path = { private_tree: private_tree, commit_secret: Melos::Crypto::Util.zero_vector(@suite.kdf.n_h), path_secrets: nil }
+    end
 
-    commit = Melos::Struct::Commit.create(proposals: proposal_or_refs, path: path[:update_path])
+    commit = Melos::Struct::Commit.create(proposals: proposal_or_refs, path: update[:update_path])
     authenticated_content = frame_and_sign(Melos::Constants::ContentType::COMMIT, commit, wire_format: wire_format, authenticated_data: authenticated_data)
-    staged = stage(authenticated_content, own_path: { private_tree: private_tree, commit_secret: path[:commit_secret], path_secrets: path[:path_secrets] })
+    staged = stage(authenticated_content, own_path: own_path)
     authenticated_content.auth.confirmation_tag = staged.confirmation_tag
 
     CommitResult.new(
@@ -421,12 +430,7 @@ class Melos::Group
 
     proposals = resolve_proposals(commit.proposals, committer)
     validate_proposal_list!(proposals, committer)
-    # 12.4: the path is required if the proposal list is empty or contains any of these
-    path_required = proposals.empty? || proposals.any? do |proposal, _sender|
-      [Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
-       Melos::Constants::ProposalType::EXTERNAL_INIT, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS].include?(proposal.proposal_type)
-    end
-    raise Melos::ProtocolError.new('commit must have a path') if commit.path.nil? && path_required
+    raise Melos::ProtocolError.new('commit must have a path') if commit.path.nil? && path_required?(proposals)
 
     tree = @ratchet_tree.dup
     private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
@@ -482,6 +486,14 @@ class Melos::Group
 
   def ensure_active!
     raise Melos::StateError.new("this member was removed from the group in epoch #{@epoch}") unless @active
+  end
+
+  # 12.4: a commit's path is required if its proposal list is empty or contains a path-required type
+  def path_required?(proposals)
+    proposals.empty? || proposals.any? do |proposal, _sender|
+      [Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
+       Melos::Constants::ProposalType::EXTERNAL_INIT, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS].include?(proposal.proposal_type)
+    end
   end
 
   # 6.1: the key that signed a message from this sender

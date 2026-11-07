@@ -115,6 +115,37 @@ suite_ids.each do |suite_id|
   end
   puts "[pass] Alice's application message decrypts for Bob and Carol"
 
+  ## A commit that only adds may omit the UpdatePath (12.4): Dave joins without a path secret
+  dave = Melos::Client.new(suite_id, identity: 'dave')
+  add_dave = alice_group.create_add_proposal(wire(dave.create_key_package.message))
+  deliver(bob_group, add_dave)
+  deliver(carol_group, add_dave)
+  result = alice_group.create_commit(path: :if_required)
+  assert_nil result.commit.public_message.content.commit.path
+  deliver(bob_group, result.commit)
+  deliver(carol_group, result.commit)
+  alice_group.merge_commit(result.staged)
+  dave_group = dave.join_group(wire(result.welcome))
+  assert_same_epoch(alice_group, bob_group, carol_group, dave_group)
+  assert_equal 3, dave_group.leaf_index
+  # Dave can follow a full commit afterwards
+  result = bob_group.create_commit
+  [alice_group, carol_group, dave_group].each { deliver(_1, result.commit) }
+  bob_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group, dave_group)
+  puts "[pass] A path-less Add commit is accepted and the joiner keeps up"
+
+  ## ... but a Remove forces a path even with path: :if_required
+  remove_dave = alice_group.create_remove_proposal(3)
+  [bob_group, carol_group, dave_group].each { deliver(_1, remove_dave) }
+  result = alice_group.create_commit(path: :if_required)
+  refute_nil result.commit.public_message.content.commit.path
+  [bob_group, carol_group, dave_group].each { deliver(_1, result.commit) }
+  alice_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group)
+  assert_equal false, dave_group.active?
+  puts "[pass] A Remove commit always carries a path"
+
   ## Carol injects a PSK every member knows: proposal to both, commit, everyone advances
   [alice, bob, carol].each { _1.add_external_psk("shared-psk", "p" * 32) }
   psk_proposal = carol_group.create_psk_proposal("shared-psk")
