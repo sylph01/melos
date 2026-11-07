@@ -52,7 +52,8 @@ class Melos::Group
   end
 
   # 11: create a group whose only member is this leaf
-  def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [])
+  #   external_psks: psk_id -> psk, for external PSKs that commits may reference
+  def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [], external_psks: {})
     ratchet_tree = Melos::RatchetTree.new(suite, [Melos::Struct::Node.new_leaf_node(leaf_node)])
     private_tree = Melos::PrivateTree.new
     private_tree[0] = encryption_private_key
@@ -68,7 +69,7 @@ class Melos::Group
       suite: suite, group_id: group_id, epoch: 0, leaf_index: 0, signature_private_key: signature_private_key,
       ratchet_tree: ratchet_tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: '', interim_transcript_hash: interim_transcript_hash(suite, '', confirmation_tag),
-      epoch_secrets: epoch_secrets
+      epoch_secrets: epoch_secrets, external_psks: external_psks
     )
   end
 
@@ -265,6 +266,15 @@ class Melos::Group
     raise ArgumentError.new("leaf #{removed_leaf_index} is blank") if @ratchet_tree.leaf_node_at(removed_leaf_index).nil?
     remove = Melos::Struct::Remove.create(removed: removed_leaf_index)
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::REMOVE, remove: remove), **options)
+  end
+
+  # 12.1.4 / 8.4: inject the external PSK psk_id, which every member must know, into the next epoch
+  def create_psk_proposal(psk_id, **options)
+    raise ArgumentError.new('unknown external PSK') unless @external_psks.key?(psk_id)
+    psk = Melos::Struct::PreSharedKey.create(
+      psk: Melos::Struct::PreSharedKeyID.create_external(psk_id: psk_id, psk_nonce: SecureRandom.random_bytes(@suite.kdf.n_h))
+    )
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::PSK, psk: psk), **options)
   end
 
   # 12.4: commit the proposals of this epoch (those sent or received, by reference, plus inline_proposals by value)

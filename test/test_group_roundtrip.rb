@@ -9,34 +9,16 @@ end
 self.assertions = 0
 
 # End-to-end exercise of the sending and receiving sides against each other, with no test vectors:
-# Alice creates a group and adds Bob, Bob adds Carol, messages flow, then Alice removes Carol.
-# Everything crosses between members as serialized MLSMessages.
+# Alice creates a group and adds Bob, Bob adds Carol, messages flow, a PSK is injected, then Alice
+# removes Carol. Everything crosses between members as serialized MLSMessages.
 
-def member(suite_id, name)
-  client = Melos::Client.new(suite_id)
-  key_package = Melos::KeyPackage.new(client)
-  leaf_node = key_package.create_leaf_node(name)
-  {
-    client: client,
-    key_package: key_package,
-    leaf_node: leaf_node,
-    key_package_message: Melos::Struct::MLSMessage.create(key_package: key_package.create_message(leaf_node))
-  }
+# an MLSMessage as it arrives from the wire
+def wire(message)
+  Melos::Struct::MLSMessage.new(message.raw)
 end
 
-def join(suite, member, welcome)
-  Melos::Group.from_welcome(
-    suite, Melos::Struct::MLSMessage.new(welcome.raw),
-    key_package: Melos::Struct::MLSMessage.new(member[:key_package_message].raw),
-    init_private_key: member[:key_package].init_private_key,
-    encryption_private_key: member[:client].encryption_private_key,
-    signature_private_key: member[:client].signature_private_key
-  )
-end
-
-# deliver an MLSMessage to a group as the bytes that would come off the wire
 def deliver(group, message)
-  group.process_message(Melos::Struct::MLSMessage.new(message.raw))
+  group.process_message(wire(message))
 end
 
 def assert_same_epoch(*groups)
@@ -51,32 +33,36 @@ end
 suite_ids = ENV['TEST_ALL'] ? [1, 2, 3, 4, 5, 6, 7] : [1, 2]
 
 suite_ids.each do |suite_id|
-  suite = Melos::Crypto::CipherSuite.new(suite_id)
   puts "cipher suite #{suite_id}:"
 
-  alice = member(suite_id, 'alice')
-  bob = member(suite_id, 'bob')
-  carol = member(suite_id, 'carol')
+  alice = Melos::Client.new(suite_id, identity: 'alice')
+  bob = Melos::Client.new(suite_id, identity: 'bob')
+  carol = Melos::Client.new(suite_id, identity: 'carol')
+
+  ## Every KeyPackage gets its own leaf encryption key
+  bob_key_package = bob.create_key_package
+  another = bob.create_key_package
+  refute_equal bob_key_package.key_package.leaf_node.encryption_key, another.key_package.leaf_node.encryption_key
+  refute_equal bob_key_package.key_package.init_key, another.key_package.init_key
+  assert_equal 2, bob.key_packages.size
+  puts "[pass] KeyPackages of one client have distinct keys"
 
   ## Alice creates the group
-  alice_group = Melos::Group.create(
-    suite, "group-#{suite_id}", alice[:leaf_node],
-    encryption_private_key: alice[:client].encryption_private_key,
-    signature_private_key: alice[:client].signature_private_key
-  )
+  alice_group = alice.create_group("group-#{suite_id}")
   assert_equal 0, alice_group.epoch
   assert_equal 1, alice_group.ratchet_tree.n_leaves
   puts "[pass] Alice creates a group"
 
-  ## Alice adds Bob: proposal, commit with a Welcome, Bob joins
-  alice_group.create_add_proposal(bob[:key_package_message])
+  ## Alice adds Bob: proposal, commit with a Welcome, Bob joins with the KeyPackage the Welcome names
+  alice_group.create_add_proposal(wire(bob_key_package.message))
   result = alice_group.create_commit
   refute_nil result.welcome
-  bob_group = join(suite, bob, result.welcome)
+  bob_group = bob.join_group(wire(result.welcome))
   alice_group.merge_commit(result.staged)
   assert_same_epoch(alice_group, bob_group)
   assert_equal 1, alice_group.epoch
   assert_equal 1, bob_group.leaf_index
+  assert_equal [another.ref], bob.key_packages.keys # the used KeyPackage is forgotten, the other remains
   assert_equal true, bob_group.private_tree.consistent?(bob_group.ratchet_tree)
   assert_equal true, alice_group.private_tree.consistent?(alice_group.ratchet_tree)
   puts "[pass] Alice adds Bob and Bob joins from the Welcome"
@@ -97,14 +83,16 @@ suite_ids.each do |suite_id|
   puts "[pass] Alice's empty commit advances both members"
 
   ## Bob adds Carol: Alice sees the proposal first, then the commit by reference; Carol joins
-  deliver(alice_group, bob_group.create_add_proposal(carol[:key_package_message]))
+  carol_key_package = carol.create_key_package
+  deliver(alice_group, bob_group.create_add_proposal(wire(carol_key_package.message)))
   result = bob_group.create_commit
   deliver(alice_group, result.commit)
   bob_group.merge_commit(result.staged)
-  carol_group = join(suite, carol, result.welcome)
+  carol_group = carol.join_group(wire(result.welcome))
   assert_same_epoch(alice_group, bob_group, carol_group)
   assert_equal 2, carol_group.leaf_index
   assert_equal 4, carol_group.ratchet_tree.n_leaves
+  assert_empty carol.key_packages
   puts "[pass] Bob adds Carol by referencing his proposal, Carol joins"
 
   ## Alice's application message reaches both, as a private message with padding
@@ -115,6 +103,18 @@ suite_ids.each do |suite_id|
     assert_equal "aad", authenticated_content.content.authenticated_data
   end
   puts "[pass] Alice's application message decrypts for Bob and Carol"
+
+  ## Carol injects a PSK every member knows: proposal to both, commit, everyone advances
+  [alice, bob, carol].each { _1.add_external_psk("shared-psk", "p" * 32) }
+  psk_proposal = carol_group.create_psk_proposal("shared-psk")
+  deliver(alice_group, psk_proposal)
+  deliver(bob_group, psk_proposal)
+  result = carol_group.create_commit
+  deliver(alice_group, result.commit)
+  deliver(bob_group, result.commit)
+  carol_group.merge_commit(result.staged)
+  assert_same_epoch(alice_group, bob_group, carol_group)
+  puts "[pass] A commit with an external PSK proposal advances every member"
 
   ## Alice removes Carol: Bob caches the proposal and processes the commit
   deliver(bob_group, alice_group.create_remove_proposal(2))
@@ -127,8 +127,14 @@ suite_ids.each do |suite_id|
   assert_nil alice_group.ratchet_tree.leaf_node_at(2)
   puts "[pass] Alice removes Carol and the tree shrinks back to two leaves"
 
-  ## Bob can still talk to Alice afterwards
+  ## A commit referencing a proposal Alice never received is rejected; Bob does not merge it
+  bob_group.create_psk_proposal("shared-psk")
+  result = bob_group.create_commit
+  assert_raises(ArgumentError) { deliver(alice_group, result.commit) }
+  puts "[pass] A commit referencing an unseen proposal is rejected"
+
+  ## Both are still in the same epoch and can talk
   authenticated_content = deliver(alice_group, bob_group.create_application_message("still here"))
   assert_equal "still here", authenticated_content.content.application_data
-  puts "[pass] Messages still flow after the removal"
+  puts "[pass] Messages still flow afterwards"
 end
