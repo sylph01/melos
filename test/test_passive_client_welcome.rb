@@ -61,7 +61,7 @@ vectors.each_with_index do |vec, vec_index|
   # TODO: If a PreSharedKeyID is part of the GroupSecrets and the client is not in possession of the corresponding PSK, return an error. Additionally, if a PreSharedKeyID has type resumption with usage reinit or branch, verify that it is the only such PSK.
   psk_secret = Melos::PSK.psk_secret(suite, psks)
 
-  key, nonce = Melos::KeySchedule.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
+  key, nonce = Melos::EpochSecrets.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
   group_info = Melos::Struct::GroupInfo.new(
     Melos::Crypto.aead_decrypt(
       suite,
@@ -89,8 +89,7 @@ vectors.each_with_index do |vec, vec_index|
   group_context = group_info.group_context
   # we want this out of processing welcome
 
-  epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
-  epoch_authenticator = Melos::KeySchedule.epoch_authenticator(suite, epoch_secret)
-  assert_equal epoch_authenticator, from_hex(vec['initial_epoch_authenticator'])
+  epoch = Melos::EpochSecrets.from_joiner(suite, joiner_secret, psk_secret, group_context, n_leaves: ratchet_tree.n_leaves)
+  assert_equal epoch.epoch_authenticator, from_hex(vec['initial_epoch_authenticator'])
   puts "[pass] Verify that the locally computed epoch_authenticator value is equal to the initial_epoch_authenticator value"
 end

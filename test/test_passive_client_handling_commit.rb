@@ -61,7 +61,7 @@ vectors.each_with_index do |vec, vec_index|
   # TODO: If a PreSharedKeyID is part of the GroupSecrets and the client is not in possession of the corresponding PSK, return an error. Additionally, if a PreSharedKeyID has type resumption with usage reinit or branch, verify that it is the only such PSK.
   psk_secret = Melos::PSK.psk_secret(suite, psks)
 
-  key, nonce = Melos::KeySchedule.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
+  key, nonce = Melos::EpochSecrets.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
   group_info = Melos::Struct::GroupInfo.new(
     Melos::Crypto.aead_decrypt(
       suite,
@@ -89,9 +89,8 @@ vectors.each_with_index do |vec, vec_index|
   group_context = group_info.group_context
   # we want this out of processing welcome
 
-  epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
-  epoch_authenticator = Melos::KeySchedule.epoch_authenticator(suite, epoch_secret)
-  assert_equal epoch_authenticator, from_hex(vec['initial_epoch_authenticator'])
+  epoch = Melos::EpochSecrets.from_joiner(suite, joiner_secret, psk_secret, group_context, n_leaves: ratchet_tree.n_leaves)
+  assert_equal epoch.epoch_authenticator, from_hex(vec['initial_epoch_authenticator'])
   puts "[pass] Verify that the locally computed epoch_authenticator value is equal to the initial_epoch_authenticator value"
 
   ## these values are group state
@@ -102,9 +101,7 @@ vectors.each_with_index do |vec, vec_index|
 
   interim_transcript_hash = Melos::Crypto.hash(suite, group_context.confirmed_transcript_hash + Melos::Vec.string_to_vec(group_info.confirmation_tag))
   resumption_psks = []
-  resumption_psks[group_context.epoch] = Melos::KeySchedule.resumption_psk(suite, epoch_secret)
-  # advance init secret
-  init_secret = Melos::KeySchedule.init_secret(suite, epoch_secret)
+  resumption_psks[group_context.epoch] = epoch.resumption_psk
   ## end of group state values
 
   # process the following epochs
@@ -116,13 +113,13 @@ vectors.each_with_index do |vec, vec_index|
       # convert list of proposals into a map of (proposalref) -> (authenticatedcontent)
       proposal_map = epoch_info['proposals']
         .map { Melos::Struct::MLSMessage.new(from_hex(_1)) }
-        .map { _1.public_message.unprotect(suite, Melos::KeySchedule.membership_key(suite, epoch_secret), group_context) }
+        .map { _1.public_message.unprotect(suite, epoch.membership_key, group_context) }
         .map { [Melos::Crypto.make_proposal_ref(suite, _1.raw), _1] }.to_h
 
       # verify epoch number
       assert_equal group_context.epoch, commit_msg.public_message.content.epoch
       # unprotect the commit
-      authenticated_content = commit_msg.public_message.unprotect(suite, Melos::KeySchedule.membership_key(suite, epoch_secret), group_context)
+      authenticated_content = commit_msg.public_message.unprotect(suite, epoch.membership_key, group_context)
       assert !authenticated_content.nil? # assert that it actually unprotects
 
       # based on sender, find public key
@@ -257,16 +254,11 @@ vectors.each_with_index do |vec, vec_index|
       # derive the PSK secret
       psk_secret = Melos::PSK.psk_secret(suite, psks)
 
-      # calculate joiner, welcome, epoch secret
-      joiner_secret = Melos::KeySchedule.joiner_secret(suite, init_secret, commit_secret, group_context)
-      # welcome_secret = Melos::KeySchedule.welcome_secret(suite, joiner_secret, psk_secret)
-      epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
-      epoch_authenticator = Melos::KeySchedule.epoch_authenticator(suite, epoch_secret)
-      assert_equal epoch_authenticator, from_hex(epoch_info['epoch_authenticator'])
+      # advance the key schedule to the new epoch
+      epoch = epoch.next(commit_secret, psk_secret, group_context, n_leaves: ratchet_tree.n_leaves)
+      assert_equal epoch.epoch_authenticator, from_hex(epoch_info['epoch_authenticator'])
       puts "[pass] Verify that the locally computed epoch_authenticator value is equal to the epoch_authenticator value for epoch #{group_context.epoch}"
-
-      # then update init secret
-      init_secret = Melos::KeySchedule.init_secret(suite, epoch_secret)
+      resumption_psks[group_context.epoch] = epoch.resumption_psk
     else
       # is a private message
     end

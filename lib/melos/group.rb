@@ -18,11 +18,12 @@ class Melos::Group
       @leaf_index = 0
       @tree_hash = @ratchet_tree.root_tree_hash
       @confirmed_transcript_hash = ''
-      @epoch_secret = SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
+      # TODO (8): derive epoch 0 through the key schedule from a random init_secret instead of picking epoch_secret directly
+      @epoch_secrets = Melos::EpochSecrets.from_epoch_secret(@cipher_suite, SecureRandom.random_bytes(@cipher_suite.kdf.n_h), n_leaves: 1)
       @extensions = []
       # calculate interim transcript hash
       # TODO: separate this into a method
-      confirmation_key = Melos::KeySchedule.confirmation_key(@cipher_suite, @epoch_secret)
+      confirmation_key = @epoch_secrets.confirmation_key
       @confirmation_tag = Melos::Crypto.mac(@cipher_suite, confirmation_key, @confirmed_transcript_hash)
       @interim_transcript_hash = Melos::Crypto.hash(@cipher_suite,
         @confirmed_transcript_hash + Melos::Vec.string_to_vec(@confirmation_tag)
@@ -133,7 +134,7 @@ class Melos::Group
       confirmation_tag = Melos::Crypto.derive_secret(@cipher_suite, Melos::Crypto::Util.zero_vector(@cipher_suite.kdf.n_h), "confirmation_tag")
       authenticated_content.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
     end
-    membership_key = Melos::KeySchedule.membership_key(@cipher_suite, @epoch_secret)
+    membership_key = @epoch_secrets.membership_key
     public_message = Melos::Struct::PublicMessage.protect(authenticated_content, @cipher_suite, membership_key, group_context)
     public_message
   end

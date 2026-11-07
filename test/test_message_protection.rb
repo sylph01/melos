@@ -31,12 +31,15 @@ message_protection_vectors.each do |mpv|
     extensions: []
   )
 
-  encryption_secret = from_hex(mpv['encryption_secret'])
-  sender_data_secret = from_hex(mpv['sender_data_secret'])
-  membership_key = from_hex(mpv['membership_key'])
-
-  # sender_data_key   = Melos::SecretTree.sender_data_key(suite, sender_data_secret, ciphertext)
-  # sender_data_nonce = Melos::SecretTree.sender_data_nonce(suite, sender_data_secret, ciphertext)
+  ## The vector gives the epoch's secrets directly. Each side of a private message holds its own
+  ## copy of the epoch (and so its own secret tree), so a fresh one is made wherever the side changes.
+  epoch_components = {
+    encryption_secret: from_hex(mpv['encryption_secret']),
+    sender_data_secret: from_hex(mpv['sender_data_secret']),
+    membership_key: from_hex(mpv['membership_key'])
+  }
+  new_epoch = -> { Melos::EpochSecrets.from_components(suite, n_leaves: 2, **epoch_components) }
+  epoch_secrets = new_epoch.()
 
   signature_pub = from_hex(mpv['signature_pub'])
   signature_priv = from_hex(mpv['signature_priv'])
@@ -49,7 +52,7 @@ message_protection_vectors.each do |mpv|
   proposal_priv = Melos::Struct::MLSMessage.new(from_hex(mpv['proposal_priv']))
 
   #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
-  authenticated_content = proposal_pub.public_message.unprotect(suite, membership_key, group_context)
+  authenticated_content = proposal_pub.public_message.unprotect(suite, epoch_secrets.membership_key, group_context)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] pub message verifies with the provided membership_key and signature_pub"
   assert_equal from_hex(mpv['proposal']), proposal_pub.public_message.content.proposal.raw
@@ -71,19 +74,18 @@ message_protection_vectors.each do |mpv|
     auth: nil
   )
   authenticated_content_2.sign(suite, signature_priv, group_context)
-  public_message_2 = Melos::Struct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
-  authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
+  public_message_2 = Melos::Struct::PublicMessage.protect(authenticated_content_2, suite, epoch_secrets.membership_key, group_context)
+  authenticated_content_3 = public_message_2.unprotect(suite, epoch_secrets.membership_key, group_context)
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content = proposal_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the receiver's copy of the epoch
+  authenticated_content = proposal_priv.private_message.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -99,11 +101,10 @@ message_protection_vectors.each do |mpv|
     auth: nil
   )
   authenticated_content_4.sign(suite, signature_priv, group_context)
-  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret, 7) # padding size is arbitrary
 
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
+  authenticated_content_5 = private_message_4.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 
@@ -114,7 +115,7 @@ message_protection_vectors.each do |mpv|
   commit_priv = Melos::Struct::MLSMessage.new(from_hex(mpv['commit_priv']))
 
   #### Verify that the pub message verifies with the provided membership_key and signature_pub, and produces the raw proposal / commit / application data
-  authenticated_content = commit_pub.public_message.unprotect(suite, membership_key, group_context)
+  authenticated_content = commit_pub.public_message.unprotect(suite, epoch_secrets.membership_key, group_context)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] pub message verifies with the provided membership_key and signature_pub"
   assert_equal from_hex(mpv['commit']), commit_pub.public_message.content.commit.raw
@@ -142,19 +143,18 @@ message_protection_vectors.each do |mpv|
   ### and here we directly set it inside authenticated content...
   authenticated_content_2.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
 
-  public_message_2 = Melos::Struct::PublicMessage.protect(authenticated_content_2, suite, membership_key, group_context)
-  authenticated_content_3 = public_message_2.unprotect(suite, membership_key, group_context)
+  public_message_2 = Melos::Struct::PublicMessage.protect(authenticated_content_2, suite, epoch_secrets.membership_key, group_context)
+  authenticated_content_3 = public_message_2.unprotect(suite, epoch_secrets.membership_key, group_context)
   puts "[s] protecting the raw value with the provided membership_key and signature_priv produces a PublicMessage that verifies with membership_key and signature_pub"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content = commit_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the receiver's copy of the epoch
+  authenticated_content = commit_priv.private_message.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -172,11 +172,10 @@ message_protection_vectors.each do |mpv|
   authenticated_content_4.sign(suite, signature_priv, group_context)
   ### and here we directly set it inside authenticated content...
   authenticated_content_4.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
-  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret, 7) # padding size is arbitrary
 
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
+  authenticated_content_5 = private_message_4.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 
@@ -208,14 +207,13 @@ message_protection_vectors.each do |mpv|
   puts "[s] verify that protecting application message fails"
 
   #### Verify that the priv message successfully unprotects using the secret tree constructed above and signature_pub
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content = application_priv.private_message.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the receiver's copy of the epoch
+  authenticated_content = application_priv.private_message.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content.verify(suite, signature_pub, group_context)
   puts "[s] the priv message successfully unprotects using the secret tree constructed above and signature_pub"
 
   #### Verify that protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
   # create FramedContent -> AuthenticatedContent then sign it
   framed_content = Melos::Struct::FramedContent.create(
     group_id: group_id,
@@ -231,11 +229,10 @@ message_protection_vectors.each do |mpv|
     auth: nil
   )
   authenticated_content_4.sign(suite, signature_priv, group_context)
-  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, secret_tree, sender_data_secret, 7) # padding size is arbitrary
+  private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret, 7) # padding size is arbitrary
 
-  # reset secret tree
-  secret_tree = Melos::SecretTree.new(suite, 2, encryption_secret)
-  authenticated_content_5 = private_message_4.unprotect(suite, secret_tree, sender_data_secret)
+  epoch_secrets = new_epoch.() # the other side's copy of the epoch
+  authenticated_content_5 = private_message_4.unprotect(suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret)
   assert_equal true, authenticated_content_5.verify(suite, signature_pub, group_context)
   puts "[s] protecting the raw value with the secret tree, sender_data_secret, and signature_priv produces a PrivateMessage that unprotects with the secret tree, sender_data_secret, and signature_pub"
 

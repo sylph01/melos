@@ -47,13 +47,9 @@ welcome_vectors.each do |wv|
 
   ## Decrypt the encrypted group info
   joiner_secret = group_secrets.joiner_secret
-  ## TODO: make key schedule into a module
-  # note that this is possible because PSKs are empty. We need to calculate psk_secret if psks are present
-  psk_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h)
-  member_secret = Melos::Crypto.kdf_extract(suite, joiner_secret, psk_secret)
-  welcome_secret = Melos::Crypto.derive_secret(suite, member_secret, "welcome")
-  welcome_nonce = Melos::Crypto.expand_with_label(suite, welcome_secret, "nonce", "", suite.hpke.n_n)
-  welcome_key   = Melos::Crypto.expand_with_label(suite, welcome_secret, "key",   "", suite.hpke.n_k)
+  # these vectors carry no PSKs, so psk_secret is that of an empty PSK list
+  psk_secret = Melos::PSK.psk_secret(suite, [])
+  welcome_key, welcome_nonce = Melos::EpochSecrets.welcome_key_and_nonce(suite, joiner_secret, psk_secret)
   decrypted_group_info = Melos::Crypto.aead_decrypt(
     suite,
     welcome_key,
@@ -70,10 +66,9 @@ welcome_vectors.each do |wv|
   puts "[s] Verify the signature on the decrypted group info using signer_pub"
 
   ## Initialize a key schedule epoch using the decrypted joiner_secret and no PSKs
-  epoch_secret = Melos::Crypto.expand_with_label(suite, member_secret, "epoch", group_info.group_context.raw, suite.kdf.n_h)
-  confirmation_key = Melos::Crypto.derive_secret(suite, epoch_secret, 'confirm')
+  epoch = Melos::EpochSecrets.from_joiner(suite, joiner_secret, psk_secret, group_info.group_context)
 
   ## Recompute a candidate confirmation_tag value using the confirmation_key from the key schedule epoch and the confirmed_transcript_hash from the decrypted GroupContext
-  assert_equal group_info.confirmation_tag, Melos::Crypto.mac(suite, confirmation_key, group_info.group_context.confirmed_transcript_hash)
+  assert_equal group_info.confirmation_tag, Melos::Crypto.mac(suite, epoch.confirmation_key, group_info.group_context.confirmed_transcript_hash)
   puts "[s] Recompute a candidate confirmation_tag value using the confirmation_key from the key schedule epoch and the confirmed_transcript_hash from the decrypted GroupContext"
 end

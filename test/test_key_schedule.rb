@@ -20,7 +20,8 @@ key_schedule_vectors.each do |key_schedule_vector|
   suite = Melos::Crypto::CipherSuite.new(key_schedule_vector['cipher_suite'])
   puts "for cipher suite ID #{key_schedule_vector['cipher_suite']}:"
 
-  init_secret = from_hex(key_schedule_vector['initial_init_secret'])
+  # before the first epoch only init_secret is known
+  epoch_secrets = Melos::EpochSecrets.from_init_secret(suite, from_hex(key_schedule_vector['initial_init_secret']))
 
   key_schedule_vector['epochs'].each_with_index do |epoch, n|
     commit_secret = from_hex(epoch['commit_secret'])
@@ -34,20 +35,17 @@ key_schedule_vectors.each do |key_schedule_vector|
     )
     # puts to_hex(group_context.raw)
     # puts epoch['group_context']
-    joiner_secret = Melos::KeySchedule.joiner_secret(suite, init_secret, commit_secret, group_context)
-    assert_equal to_hex(joiner_secret), epoch['joiner_secret']
+    psk_secret = from_hex(epoch['psk_secret'])
+    # advance the key schedule: joiner_secret from init_secret and commit_secret, then epoch_secret
+    epoch_secrets = epoch_secrets.next(commit_secret, psk_secret, group_context)
+
+    assert_equal epoch['joiner_secret'], to_hex(epoch_secrets.joiner_secret)
     puts "[s] joiner_secret"
 
-    # Welcome Secret
-    psk_secret = from_hex(epoch['psk_secret'])
-    welcome_secret = Melos::KeySchedule.welcome_secret(suite, joiner_secret, psk_secret)
-    assert_equal to_hex(welcome_secret), epoch['welcome_secret']
+    assert_equal epoch['welcome_secret'], to_hex(epoch_secrets.welcome_secret)
     puts "[s] welcome_secret"
 
     # Secrets from epoch_secret
-    epoch_secret = Melos::KeySchedule.epoch_secret(suite, joiner_secret, psk_secret, group_context)
-
-    # secrets = {}
     [
       'sender_data_secret',
       'encryption_secret',
@@ -58,13 +56,12 @@ key_schedule_vectors.each do |key_schedule_vector|
       'resumption_psk',
       'epoch_authenticator'
     ].each do |secret_name|
-      assert_equal Melos::KeySchedule.send(secret_name.to_sym, suite, epoch_secret), from_hex(epoch[secret_name])
+      assert_equal from_hex(epoch[secret_name]), epoch_secrets.send(secret_name.to_sym)
       puts "[s] #{secret_name}"
     end
 
     # Next Init Secret
-    init_secret = Melos::KeySchedule.init_secret(suite, epoch_secret)
-    assert_equal to_hex(init_secret), epoch['init_secret']
+    assert_equal epoch['init_secret'], to_hex(epoch_secrets.init_secret)
     puts "[s] init_secret"
     puts "[s] Epoch #{n}"
   end
