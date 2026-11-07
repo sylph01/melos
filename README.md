@@ -7,18 +7,70 @@ a [Messaging Layer Security Protocol](https://www.rfc-editor.org/rfc/rfc9420.htm
 
 (yes, [an mls gem](https://rubygems.org/gems/mls) happened to exist since 2014, so...)
 
-## Note on implementation status
+## Implementation status
 
-As of version 0.0.1, this implements:
+As of the current `main` branch, this implements:
 
-- Serialization/deserialization of messages
-- Key Schedule
-- Encryption Secret Tree
-- Applying Add/Update/Remove/PreSharedKey/GroupContextExtensions Proposal types
-- (thus passes all test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md))
+- Serialization and deserialization of the RFC 9420 structures
+- Key schedule, secret tree, pre-shared keys, transcript hashes
+- The ratchet tree: TreeKEM (creating and processing UpdatePaths), tree hashes, parent hashes
+- Groups: creating a group, Add / Remove / PreSharedKey / GroupContextExtensions proposals,
+  commits with an UpdatePath and the matching Welcome, joining via Welcome,
+  application messages as PrivateMessage, handshake messages as PublicMessage or PrivateMessage
+- Processing Update proposals and commits from other members
+- Most MUST-level validations of the RFC; [docs/validation.md](docs/validation.md) maps each one to the code
+- All test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md),
+  plus round-trip tests in which several members create, join, message and leave a group
 
-but lacks the following (not a complete list):
+It does not yet implement:
 
-- Creating messages
-- Applying ReInit/ExternalInit proposals
-- Validation (rejecting error cases)
+- Creating Update proposals
+- ReInit, external commits (ExternalInit), external senders, resumption PSKs, subgroup branching
+- Decrypting application messages from earlier epochs, and keeping unused keys for out-of-order delivery
+- The deletion schedule of Section 9.2 beyond dropping the previous epoch
+- Credential validation beyond basic credentials (an application hook, `credential_validator:`, is provided)
+- Persistence of client and group state
+- Interop testing against other implementations
+
+## Usage
+
+Messages cross between members as `Melos::Struct::MLSMessage` objects; `raw` gives the bytes to
+send and `Melos::Struct::MLSMessage.new(bytes)` parses them.
+
+```ruby
+require 'melos'
+
+# cipher suite 1 is MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
+alice = Melos::Client.new(1, identity: 'alice')
+bob   = Melos::Client.new(1, identity: 'bob')
+
+# Bob publishes a KeyPackage
+bob_key_package = bob.create_key_package
+
+# Alice creates a group and adds Bob
+group = alice.create_group("some group id")
+group.create_add_proposal(bob_key_package.message)
+result = group.create_commit
+# result.commit is the Commit to send to the group, result.welcome the Welcome for Bob;
+# merge once the Delivery Service has accepted the commit
+group.merge_commit(result.staged)
+
+# Bob joins
+bob_group = bob.join_group(result.welcome)
+
+# and talks
+message = bob_group.create_application_message("hello")
+group.process_message(message).content.application_data # => "hello"
+```
+
+`Melos::Group` holds one member's view of one group. `Melos::Client` holds the long-lived identity,
+the external PSKs and the KeyPackages it has published.
+
+## Tests
+
+```
+bundle exec rake test
+```
+
+runs a subset of the test vectors; `TEST_ALL=1 bundle exec rake test` runs all of them, for every cipher suite.
+The vectors are the ones from [mls-implementations](https://github.com/mlswg/mls-implementations), in `test_vectors/`.
