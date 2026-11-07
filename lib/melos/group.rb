@@ -13,9 +13,10 @@ class Melos::Group
       # do nothing
     else
       # single node, a leaf node containing an HPKE PK and credential for the creator
-      @ratchet_tree = [node]
+      @ratchet_tree = Melos::RatchetTree.new(@cipher_suite, [node])
+      @private_tree = Melos::PrivateTree.new # TODO: hold the creator's leaf private key (node index 0)
       @leaf_index = 0
-      @tree_hash = Melos::Struct::RatchetTree.root_tree_hash(@cipher_suite, @ratchet_tree)
+      @tree_hash = @ratchet_tree.root_tree_hash
       @confirmed_transcript_hash = ''
       @epoch_secret = SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
       @extensions = []
@@ -81,7 +82,7 @@ class Melos::Group
 
   def create_empty_commit(signature_private_key)
     # empty commit = update path only
-    result = Melos::Struct::RatchetTree.create_update_path(@ratchet_tree, @leaf_index, signature_private_key, @group_id, group_context, @cipher_suite)
+    result = @ratchet_tree.create_update_path(@private_tree, @leaf_index, signature_private_key, @group_id, group_context)
     commit = Melos::Struct::Commit.create(
       proposals: [],
       path: result[:update_path]

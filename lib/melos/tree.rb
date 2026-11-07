@@ -74,10 +74,6 @@ class Melos::Tree
   end
 
   class << self
-    def n_leaves(tree)
-      (tree.size + 1) / 2
-    end
-
     def log2(x)
       if x == 0
         return 0
@@ -200,46 +196,6 @@ class Melos::Tree
 
     def leaf?(node_index)
       node_index % 2 == 0
-    end
-
-    def truncate!(tree)
-      root = root(n_leaves(tree))
-      if tree[(root + 1)..]&.all?(nil)
-        tree.slice!(root..) # keep left half of tree
-        truncate!(tree) # then attempt to truncate again
-      end
-      # right half of tree has an element, so finish
-    end
-
-    def filtered_direct_path(tree, node_index)
-      n_l = n_leaves(tree)
-      direct_path(node_index, n_l).reject { resolution(tree, sibling_from_leaf(node_index, _1, n_l)) == [] }
-    end
-
-    def copath_nodes_of_filtered_direct_path(tree, node_index)
-      filtered_direct_path(tree, node_index).map do |a|
-        sibling_from_leaf(node_index, a, n_leaves(tree))
-      end
-    end
-
-    def resolution(tree, node_index)
-      node = tree[node_index]
-      if node.nil?
-        if Melos::Tree.leaf?(node_index)
-          # The resolution of a blank leaf node is the empty list.
-          []
-        else
-          # The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
-          resolution(tree, Melos::Tree.left(node_index)) + resolution(tree, Melos::Tree.right(node_index))
-        end
-      else
-        # The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
-        if node.parent_node
-          [node_index] + node.parent_node.unmerged_leaves.map { _1 * 2} # convert leaf index to node index
-        else
-          [node_index]
-        end
-      end
     end
 
     # def common_ancestor_direct(x, y)

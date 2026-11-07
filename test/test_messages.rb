@@ -83,8 +83,9 @@ public_message_commit = Melos::Struct::MLSMessage.new(from_hex(message_vector["p
 assert_equal to_hex(public_message_commit.raw), message_vector["public_message_commit"]
 puts "[s] public_message_commit"
 
-ratchet_tree = Melos::Struct::RatchetTree.parse(from_hex(message_vector["ratchet_tree"]))
-assert_equal to_hex(Melos::Struct::RatchetTree.raw(ratchet_tree)), message_vector["ratchet_tree"]
+# the suite does not affect (de)serialization; these vectors only check the wire format
+ratchet_tree = Melos::RatchetTree.parse(Melos::Crypto::CipherSuite.new(1), from_hex(message_vector["ratchet_tree"]))
+assert_equal to_hex(ratchet_tree.raw), message_vector["ratchet_tree"]
 puts "[s] ratchet_tree"
 
 puts

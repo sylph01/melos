@@ -77,13 +77,13 @@ vectors.each_with_index do |vec, vec_index|
   # construct ratchet tree
   if vec['ratchet_tree']
     # get ratchet tree from vector
-    ratchet_tree = Melos::Struct::RatchetTree.parse(from_hex(vec['ratchet_tree']))
+    ratchet_tree = Melos::RatchetTree.parse(suite, from_hex(vec['ratchet_tree']))
   else
     # get ratchet tree from extensions
-    ratchet_tree = Melos::Struct::RatchetTree.parse(group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }.extension_data)
+    ratchet_tree = Melos::RatchetTree.parse(suite, group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }.extension_data)
   end
   # get signer key
-  pub_key_of_signer = ratchet_tree[group_info_signer * 2].leaf_node.signature_key
+  pub_key_of_signer = ratchet_tree.leaf_node_at(group_info_signer).signature_key
   assert group_info.verify(suite, pub_key_of_signer)
 
   group_context = group_info.group_context

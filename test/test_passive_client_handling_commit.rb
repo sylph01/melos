@@ -77,13 +77,13 @@ vectors.each_with_index do |vec, vec_index|
   # construct ratchet tree
   if vec['ratchet_tree']
     # get ratchet tree from vector
-    ratchet_tree = Melos::Struct::RatchetTree.parse(from_hex(vec['ratchet_tree']))
+    ratchet_tree = Melos::RatchetTree.parse(suite, from_hex(vec['ratchet_tree']))
   else
     # get ratchet tree from extensions
-    ratchet_tree = Melos::Struct::RatchetTree.parse(group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }.extension_data)
+    ratchet_tree = Melos::RatchetTree.parse(suite, group_info.extensions.find { _1.extension_type == Melos::Constants::ExtensionType::RATCHET_TREE }.extension_data)
   end
   # get signer key
-  pub_key_of_signer = ratchet_tree[group_info_signer * 2].leaf_node.signature_key
+  pub_key_of_signer = ratchet_tree.leaf_node_at(group_info_signer).signature_key
   assert group_info.verify(suite, pub_key_of_signer)
 
   group_context = group_info.group_context
@@ -96,10 +96,9 @@ vectors.each_with_index do |vec, vec_index|
 
   ## these values are group state
   # need to find which leaf the current user is
-  node_index_of_current_user = ratchet_tree.find_index { _1&.leaf_node&.encryption_key == encryption_pub_from_key_package }
-  leaf_index_of_current_user = node_index_of_current_user / 2
-  encryption_priv_tree = []
-  encryption_priv_tree[node_index_of_current_user] = encryption_priv
+  leaf_index_of_current_user = ratchet_tree.find_leaf_index { _1.encryption_key == encryption_pub_from_key_package }
+  private_tree = Melos::PrivateTree.new
+  private_tree[leaf_index_of_current_user * 2] = encryption_priv
 
   interim_transcript_hash = Melos::Crypto.hash(suite, group_context.confirmed_transcript_hash + Melos::Vec.string_to_vec(group_info.confirmation_tag))
   resumption_psks = []
@@ -129,9 +128,8 @@ vectors.each_with_index do |vec, vec_index|
       # based on sender, find public key
       if commit_msg.public_message.content.sender.sender_type == Melos::Constants::SenderType::MEMBER
         sender_leaf_index = commit_msg.public_message.content.sender.leaf_index
-        sender_node_index = commit_msg.public_message.content.sender.leaf_index * 2
       end
-      public_key = ratchet_tree[sender_node_index].leaf_node.signature_key
+      public_key = ratchet_tree.leaf_node_at(sender_leaf_index).signature_key
       assert authenticated_content.verify(suite, public_key, group_context)
 
       commit = commit_msg.public_message.content.commit
@@ -148,7 +146,7 @@ vectors.each_with_index do |vec, vec_index|
       p proposal_list.map { Melos::Constants::ProposalType::NAMES[_1[0].proposal_type] }
 
       # puts "Tree before apply:"
-      # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
+      # ratchet_tree.dump
 
       # validate proposal list
       # p commit.proposals
@@ -168,8 +166,7 @@ vectors.each_with_index do |vec, vec_index|
       updates = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::UPDATE }
       updates.each do |prop|
         proposal = prop[0]
-        node = Melos::Struct::Node.new_leaf_node(proposal.update.leaf_node)
-        Melos::Struct::RatchetTree.update_leaf_node(ratchet_tree, node, prop[1])
+        ratchet_tree.update_leaf_node(prop[1], proposal.update.leaf_node)
       end
 
       # Remove
@@ -177,15 +174,14 @@ vectors.each_with_index do |vec, vec_index|
       removes.each do |prop|
         proposal = prop[0]
         removed = proposal.remove.removed
-        Melos::Struct::RatchetTree.remove_leaf_node(ratchet_tree, removed)
+        ratchet_tree.remove_leaf_node(removed)
       end
       # Add
       adds = proposal_list.select { _1[0].proposal_type == Melos::Constants::ProposalType::ADD }
       joiners = []
       adds.each do |prop|
         proposal = prop[0]
-        node = Melos::Struct::Node.new_leaf_node(proposal.add.key_package.leaf_node)
-        inserted_leaf_index = Melos::Struct::RatchetTree.add_leaf_node(ratchet_tree, node)
+        inserted_leaf_index = ratchet_tree.add_leaf_node(proposal.add.key_package.leaf_node)
         joiners << inserted_leaf_index
       end
 
@@ -206,13 +202,13 @@ vectors.each_with_index do |vec, vec_index|
       # ReInit
 
       # puts "Tree after apply:"
-      # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
+      # ratchet_tree.dump
 
       group_context = Melos::Struct::GroupContext.create(
         cipher_suite: group_context.cipher_suite,
         group_id: group_context.group_id,
         epoch: group_context.epoch,
-        tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
+        tree_hash: ratchet_tree.root_tree_hash,
         confirmed_transcript_hash: group_context.confirmed_transcript_hash, # provisional
         extensions: group_context.extensions # assume no GroupContextExtensions proposal
       )
@@ -223,23 +219,23 @@ vectors.each_with_index do |vec, vec_index|
       # validations TODO
       # p commit
       if commit.path
-        Melos::Struct::RatchetTree.merge_update_path(suite, ratchet_tree, sender_leaf_index, commit.path)
+        ratchet_tree.merge_update_path(sender_leaf_index, commit.path)
 
         provisional_group_context = Melos::Struct::GroupContext.create(
           cipher_suite: group_context.cipher_suite,
           group_id: group_context.group_id,
           epoch: group_context.epoch + 1,
-          tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
+          tree_hash: ratchet_tree.root_tree_hash,
           confirmed_transcript_hash: group_context.confirmed_transcript_hash, # provisional
           extensions: group_context.extensions # assume no GroupContextExtensions proposal
         )
-        # Melos::Struct::RatchetTree.dump_tree(ratchet_tree)
-        # puts "root hash: " + to_hex(Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree))
+        # ratchet_tree.dump
+        # puts "root hash: " + to_hex(ratchet_tree.root_tree_hash)
 
         # decrypt the path secrets for UpdatePath
         # assumes that this client is leaf 0
-        decrypted_path_secret = Melos::Struct::RatchetTree.decrypt_path_secret(suite, ratchet_tree, encryption_priv_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, provisional_group_context, joiners)
-        commit_secret = Melos::Struct::RatchetTree.calculate_commit_secret(suite, ratchet_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, decrypted_path_secret)
+        decrypted_path_secret = ratchet_tree.decrypt_path_secret(private_tree, commit.path, sender_leaf_index, leaf_index_of_current_user, provisional_group_context, joiners)
+        commit_secret = ratchet_tree.calculate_commit_secret(commit.path, sender_leaf_index, leaf_index_of_current_user, decrypted_path_secret)
       else
         commit_secret = Melos::Crypto::Util.zero_vector(suite.kdf.n_h)
       end
@@ -253,7 +249,7 @@ vectors.each_with_index do |vec, vec_index|
         cipher_suite: group_context.cipher_suite,
         group_id: group_context.group_id,
         epoch: group_context.epoch + 1,
-        tree_hash: Melos::Struct::RatchetTree.root_tree_hash(suite, ratchet_tree),
+        tree_hash: ratchet_tree.root_tree_hash,
         confirmed_transcript_hash: confirmed_transcript_hash,
         extensions: group_context.extensions
       )

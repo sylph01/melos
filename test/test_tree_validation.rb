@@ -19,30 +19,24 @@ vectors.each_with_index do |vec, tree_index|
   suite = Melos::Crypto::CipherSuite.new(vec['cipher_suite'])
   puts "for tree num #{tree_index}:"
 
-  tree = Melos::Struct::RatchetTree.parse(from_hex(vec['tree']))
-  group_id = from_hex(vec['tree'])
+  tree = Melos::RatchetTree.parse(suite, from_hex(vec['tree']))
+  group_id = from_hex(vec['group_id'])
 
   vec['resolutions'].each_with_index do |resolution, index|
-    assert_equal resolution, Melos::Tree.resolution(tree, index)
+    assert_equal resolution, tree.resolution(index)
   end
   puts "[pass] Resolutions of each node of the tree matches"
 
   vec['tree_hashes'].each_with_index do |tree_hash, index|
-    assert_equal tree_hash, to_hex(Melos::Struct::RatchetTree.tree_hash(tree, index, suite))
+    assert_equal tree_hash, to_hex(tree.tree_hash(index))
   end
   puts "[pass] Tree hash calculation matches"
 
-  assert_equal true, Melos::Struct::RatchetTree.verify_parent_hash_of_tree(tree, suite)
+  assert_equal true, tree.parent_hash_valid?
   puts "[pass] All parent nodes are parent-hash valid (a.k.a. can be chained back to a leaf node)"
 
-  tree.select.with_index { |n, n_idx| Melos::Tree.leaf?(n_idx) }.map.with_index do |node, node_index|
-    if node.nil?
-      true
-    else
-      leaf_node = node.leaf_node
-
-      leaf_node.verify(suite, group_id, (node_index / 2))
-    end
-  end.all?(true)
+  tree.each_leaf_node do |leaf_node, leaf_index|
+    assert_equal true, leaf_node.verify(suite, group_id, leaf_index)
+  end
   puts "[pass] Verify the signatures on all leaves of tree using the provided group_id as context"
 end
