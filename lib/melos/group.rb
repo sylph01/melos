@@ -332,12 +332,12 @@ class Melos::Group
       @pending_proposals.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
       inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
     proposals = resolve_proposals(proposal_or_refs, @leaf_index)
+    validate_proposal_list!(proposals, @leaf_index)
 
     # 12.4.2: the UpdatePath is built on the tree after the proposals, and not encrypted to the leaves being added
     tree = @ratchet_tree.dup
     private_tree = @private_tree.dup
     extensions, joiners, _psk_ids = apply_proposals(tree, proposals)
-    raise ArgumentError.new('commit removes its own sender') if tree.leaf_node_at(@leaf_index).nil? # 12.2
     # TODO: the path may be left out when 12.4 does not require it
     provisional_group_context = Melos::Struct::GroupContext.create(
       cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
@@ -403,6 +403,7 @@ class Melos::Group
     commit = content.commit
 
     proposals = resolve_proposals(commit.proposals, committer)
+    validate_proposal_list!(proposals, committer)
     # 12.4: the path is required if the proposal list is empty or contains any of these
     path_required = proposals.empty? || proposals.any? do |proposal, _sender|
       [Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
@@ -414,16 +415,17 @@ class Melos::Group
     private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
     extensions, joiners, psk_ids = apply_proposals(tree, proposals)
 
-    # 12.2: a commit MUST NOT remove its own sender
-    raise ArgumentError.new('commit removes its own sender') if tree.leaf_node_at(committer).nil?
-    # 12.4.2: a commit may remove us; we cannot follow it any further, since the path is not encrypted to us
-    if tree.leaf_node_at(@leaf_index).nil?
+    # 12.4.2: a commit may remove us; we cannot follow it any further, since the path is not encrypted to us.
+    # Our leaf index may be non-blank afterwards if an Add in the same commit reused it, so look at the Removes themselves.
+    removes_us = proposals.any? { |proposal, _sender| proposal.proposal_type == Melos::Constants::ProposalType::REMOVE && proposal.remove.removed == @leaf_index }
+    if removes_us
       return StagedCommit.new(ratchet_tree: tree, extensions: extensions, joiners: joiners, psk_ids: psk_ids, removes_us: true)
     end
 
     if commit.path.nil?
       commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
     else
+      validate_update_path!(tree, commit.path, committer, joiners) unless own_path
       tree.merge_update_path(committer, commit.path)
       if own_path
         commit_secret = own_path[:commit_secret]
@@ -463,6 +465,61 @@ class Melos::Group
 
   def ensure_active!
     raise ArgumentError.new("this member was removed from the group in epoch #{@epoch}") unless @active
+  end
+
+  # 12.2: the rules a regular commit's proposal list must satisfy as a whole; proposals is [proposal, sender] pairs.
+  # "The same client" is taken to mean the same signature key, which the RFC leaves to the application.
+  def validate_proposal_list!(proposals, committer)
+    of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
+    updates = of_type.(Melos::Constants::ProposalType::UPDATE)
+    removes = of_type.(Melos::Constants::ProposalType::REMOVE)
+    adds    = of_type.(Melos::Constants::ProposalType::ADD)
+    psks    = of_type.(Melos::Constants::ProposalType::PSK)
+    gces    = of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS)
+
+    raise ArgumentError.new('commit contains an Update from the committer') if updates.any? { |_proposal, sender| sender == committer }
+    removed = removes.map { |proposal, _sender| proposal.remove.removed }
+    raise ArgumentError.new('commit removes its own sender') if removed.include?(committer)
+    touched = updates.map { |_proposal, sender| sender } + removed
+    repeated = touched.tally.select { |_leaf, count| count > 1 }.keys
+    raise ArgumentError.new("more than one Update or Remove for leaf #{repeated.join(', ')}") unless repeated.empty?
+
+    added_keys = adds.map { |proposal, _sender| proposal.add.key_package.leaf_node.signature_key }
+    raise ArgumentError.new('more than one Add for the same client') unless added_keys.uniq.size == added_keys.size
+    staying_keys = []
+    @ratchet_tree.each_leaf_node { |leaf_node, leaf_index| staying_keys << leaf_node.signature_key unless removed.include?(leaf_index) }
+    raise ArgumentError.new('Add for a client already in the group') unless (added_keys & staying_keys).empty?
+
+    psk_ids = psks.map { |proposal, _sender| proposal.psk.psk.raw }
+    raise ArgumentError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
+    raise ArgumentError.new('more than one GroupContextExtensions proposal') if gces.size > 1
+    # ReInit must be alone and ExternalInit must be absent (12.2); both are rejected as unsupported in apply_proposals
+  end
+
+  # 12.4.2, 7.6, 7.9.2: a received UpdatePath, checked against the tree after the proposals and before the merge
+  def validate_update_path!(tree, update_path, committer, joiners)
+    leaf_node = update_path.leaf_node
+    # TODO (tier 3): full LeafNode validation per 7.3; for now its source and signature
+    raise ArgumentError.new('UpdatePath leaf node source is not commit') unless leaf_node.leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
+    raise ArgumentError.new('UpdatePath leaf node signature does not verify') unless leaf_node.verify(@suite, @group_id, committer)
+    current_leaf_node = tree.leaf_node_at(committer)
+    raise ArgumentError.new('UpdatePath leaf node reuses the committer\'s encryption key') if leaf_node.encryption_key == current_leaf_node.encryption_key
+    # 7.9.2: the parent hash in the new leaf is the one this tree and path imply
+    raise ArgumentError.new('UpdatePath leaf node parent hash does not verify') unless tree.verify_parent_hash_of_path(committer, update_path)
+    # 12.4.2, 16.7: the path's public keys are new to the tree and distinct from each other
+    path_keys = [leaf_node.encryption_key] + update_path.nodes.map(&:encryption_key)
+    raise ArgumentError.new('UpdatePath public keys are not distinct') unless path_keys.uniq.size == path_keys.size
+    tree_keys = tree.nodes.compact.map(&:public_encryption_key)
+    raise ArgumentError.new('a public key in the UpdatePath already appears in the tree') unless (path_keys & tree_keys).empty?
+    # 7.6: each node carries one ciphertext per member of its copath resolution, the new leaves excluded
+    copath_nodes = tree.copath_nodes_of_filtered_direct_path(committer * 2)
+    raise ArgumentError.new('malformed update path') unless copath_nodes.count == update_path.nodes.count
+    excluded = joiners.map { _1.leaf_index * 2 }
+    update_path.nodes.each_with_index do |node, i|
+      expected = (tree.resolution(copath_nodes[i]) - excluded).count
+      next if node.encrypted_path_secret.count == expected
+      raise ArgumentError.new("UpdatePath node #{i} has #{node.encrypted_path_secret.count} ciphertexts, expected #{expected}")
+    end
   end
 
   # 6.1: the key that signed a message from this sender
