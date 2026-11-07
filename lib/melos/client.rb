@@ -40,21 +40,22 @@ class Melos::Client
     bundle
   end
 
-  # 11: create a group with this client as its only member
-  def create_group(group_id, extensions: [])
+  # 11: create a group with this client as its only member.
+  # options are passed to Melos::Group (credential_validator:, max_leaf_node_lifetime:)
+  def create_group(group_id, extensions: [], **options)
     bundle = Melos::KeyPackageBundle.generate(
       @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
     )
     Melos::Group.create(
       @cipher_suite, group_id, bundle.key_package.leaf_node,
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
-      extensions: extensions, external_psks: @external_psks
+      extensions: extensions, external_psks: @external_psks, **options
     )
   end
 
   # 12.4.3.1: join the group a Welcome adds us to, using whichever of our KeyPackages it is addressed to.
   # That KeyPackage is then forgotten: its init key is single-use.
-  def join_group(welcome, ratchet_tree: nil)
+  def join_group(welcome, ratchet_tree: nil, **options)
     welcome_struct = welcome.is_a?(Melos::Struct::MLSMessage) ? welcome.welcome : welcome
     raise ArgumentError.new('not a Welcome message') if welcome_struct.nil?
     bundle = welcome_struct.secrets.map(&:new_member).filter_map { @key_packages[_1] }.first
@@ -63,7 +64,7 @@ class Melos::Client
       @cipher_suite, welcome,
       key_package: bundle.key_package, init_private_key: bundle.init_private_key,
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
-      external_psks: @external_psks, ratchet_tree: ratchet_tree
+      external_psks: @external_psks, ratchet_tree: ratchet_tree, **options
     )
     @key_packages.delete(bundle.ref)
     group

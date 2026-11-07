@@ -40,8 +40,12 @@ class Melos::Group
               :confirmed_transcript_hash, :interim_transcript_hash, :epoch_secrets, :resumption_psks, :external_psks
 
   # Use .create or .from_welcome rather than calling this directly.
+  #   credential_validator: ->(credential, leaf_node) { true/false }, the application's Authentication Service check (5.3.1);
+  #                         the default accepts basic credentials only
+  #   max_leaf_node_lifetime: longest acceptable Lifetime of a leaf node in seconds (7.2); nil for no limit
   def initialize(suite:, group_id:, epoch:, leaf_index:, signature_private_key:, ratchet_tree:, private_tree:,
-                 extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {})
+                 extensions:, confirmed_transcript_hash:, interim_transcript_hash:, epoch_secrets:, external_psks: {},
+                 credential_validator: DEFAULT_CREDENTIAL_VALIDATOR, max_leaf_node_lifetime: DEFAULT_MAX_LEAF_NODE_LIFETIME)
     @suite = suite
     @group_id = group_id
     @epoch = epoch
@@ -54,6 +58,8 @@ class Melos::Group
     @interim_transcript_hash = interim_transcript_hash
     @epoch_secrets = epoch_secrets
     @external_psks = external_psks # psk_id -> psk
+    @credential_validator = credential_validator
+    @max_leaf_node_lifetime = max_leaf_node_lifetime
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
     @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @group_context = nil
@@ -74,7 +80,7 @@ class Melos::Group
 
   # 11: create a group whose only member is this leaf
   #   external_psks: psk_id -> psk, for external PSKs that commits may reference
-  def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [], external_psks: {})
+  def self.create(suite, group_id, leaf_node, encryption_private_key:, signature_private_key:, extensions: [], external_psks: {}, **options)
     Melos::Struct::Extension.check_unique_types!(extensions, 'GroupContext extensions')
     ratchet_tree = Melos::RatchetTree.new(suite, [Melos::Struct::Node.new_leaf_node(leaf_node)])
     private_tree = Melos::PrivateTree.new
@@ -91,7 +97,7 @@ class Melos::Group
       suite: suite, group_id: group_id, epoch: 0, leaf_index: 0, signature_private_key: signature_private_key,
       ratchet_tree: ratchet_tree, private_tree: private_tree, extensions: extensions,
       confirmed_transcript_hash: '', interim_transcript_hash: interim_transcript_hash(suite, '', confirmation_tag),
-      epoch_secrets: epoch_secrets, external_psks: external_psks
+      epoch_secrets: epoch_secrets, external_psks: external_psks, **options
     )
   end
 
@@ -102,7 +108,7 @@ class Melos::Group
   #   external_psks: psk_id -> psk, for any external PSKs the Welcome references
   #   ratchet_tree: serialized tree, if it was delivered outside the Welcome's ratchet_tree extension
   def self.from_welcome(suite, welcome, key_package:, init_private_key:, encryption_private_key:, signature_private_key:,
-                        external_psks: {}, ratchet_tree: nil)
+                        external_psks: {}, ratchet_tree: nil, **options)
     if welcome.is_a?(Melos::Struct::MLSMessage)
       check_message_version!(welcome)
       welcome = welcome.welcome
@@ -174,7 +180,7 @@ class Melos::Group
       signature_private_key: signature_private_key, ratchet_tree: tree, private_tree: private_tree,
       extensions: group_context.extensions, confirmed_transcript_hash: group_context.confirmed_transcript_hash,
       interim_transcript_hash: interim_transcript_hash(suite, group_context.confirmed_transcript_hash, group_info.confirmation_tag),
-      epoch_secrets: epoch_secrets, external_psks: external_psks
+      epoch_secrets: epoch_secrets, external_psks: external_psks, **options
     )
   end
 
@@ -302,6 +308,7 @@ class Melos::Group
       raise ArgumentError.new('KeyPackage version differs from its MLSMessage') unless key_package.key_package.version == key_package.version
       key_package = key_package.key_package
     end
+    validate_key_package!(key_package, tree: @ratchet_tree, leaf_index: nil, extensions: @extensions, sending: true)
     add = Melos::Struct::Add.create(key_package: key_package)
     create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: add), **options)
   end
@@ -337,7 +344,7 @@ class Melos::Group
     # 12.4.2: the UpdatePath is built on the tree after the proposals, and not encrypted to the leaves being added
     tree = @ratchet_tree.dup
     private_tree = @private_tree.dup
-    extensions, joiners, _psk_ids = apply_proposals(tree, proposals)
+    extensions, joiners, _psk_ids = apply_proposals(tree, proposals, sending: true)
     # TODO: the path may be left out when 12.4 does not require it
     provisional_group_context = Melos::Struct::GroupContext.create(
       cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
@@ -413,7 +420,7 @@ class Melos::Group
 
     tree = @ratchet_tree.dup
     private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
-    extensions, joiners, psk_ids = apply_proposals(tree, proposals)
+    extensions, joiners, psk_ids = apply_proposals(tree, proposals, sending: !own_path.nil?)
 
     # 12.4.2: a commit may remove us; we cannot follow it any further, since the path is not encrypted to us.
     # Our leaf index may be non-blank afterwards if an Add in the same commit reused it, so look at the Removes themselves.
@@ -425,7 +432,7 @@ class Melos::Group
     if commit.path.nil?
       commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
     else
-      validate_update_path!(tree, commit.path, committer, joiners) unless own_path
+      validate_update_path!(tree, commit.path, committer, joiners, extensions) unless own_path
       tree.merge_update_path(committer, commit.path)
       if own_path
         commit_secret = own_path[:commit_secret]
@@ -467,61 +474,6 @@ class Melos::Group
     raise ArgumentError.new("this member was removed from the group in epoch #{@epoch}") unless @active
   end
 
-  # 12.2: the rules a regular commit's proposal list must satisfy as a whole; proposals is [proposal, sender] pairs.
-  # "The same client" is taken to mean the same signature key, which the RFC leaves to the application.
-  def validate_proposal_list!(proposals, committer)
-    of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
-    updates = of_type.(Melos::Constants::ProposalType::UPDATE)
-    removes = of_type.(Melos::Constants::ProposalType::REMOVE)
-    adds    = of_type.(Melos::Constants::ProposalType::ADD)
-    psks    = of_type.(Melos::Constants::ProposalType::PSK)
-    gces    = of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS)
-
-    raise ArgumentError.new('commit contains an Update from the committer') if updates.any? { |_proposal, sender| sender == committer }
-    removed = removes.map { |proposal, _sender| proposal.remove.removed }
-    raise ArgumentError.new('commit removes its own sender') if removed.include?(committer)
-    touched = updates.map { |_proposal, sender| sender } + removed
-    repeated = touched.tally.select { |_leaf, count| count > 1 }.keys
-    raise ArgumentError.new("more than one Update or Remove for leaf #{repeated.join(', ')}") unless repeated.empty?
-
-    added_keys = adds.map { |proposal, _sender| proposal.add.key_package.leaf_node.signature_key }
-    raise ArgumentError.new('more than one Add for the same client') unless added_keys.uniq.size == added_keys.size
-    staying_keys = []
-    @ratchet_tree.each_leaf_node { |leaf_node, leaf_index| staying_keys << leaf_node.signature_key unless removed.include?(leaf_index) }
-    raise ArgumentError.new('Add for a client already in the group') unless (added_keys & staying_keys).empty?
-
-    psk_ids = psks.map { |proposal, _sender| proposal.psk.psk.raw }
-    raise ArgumentError.new('more than one PreSharedKey proposal for the same PreSharedKeyID') unless psk_ids.uniq.size == psk_ids.size
-    raise ArgumentError.new('more than one GroupContextExtensions proposal') if gces.size > 1
-    # ReInit must be alone and ExternalInit must be absent (12.2); both are rejected as unsupported in apply_proposals
-  end
-
-  # 12.4.2, 7.6, 7.9.2: a received UpdatePath, checked against the tree after the proposals and before the merge
-  def validate_update_path!(tree, update_path, committer, joiners)
-    leaf_node = update_path.leaf_node
-    # TODO (tier 3): full LeafNode validation per 7.3; for now its source and signature
-    raise ArgumentError.new('UpdatePath leaf node source is not commit') unless leaf_node.leaf_node_source == Melos::Constants::LeafNodeSource::COMMIT
-    raise ArgumentError.new('UpdatePath leaf node signature does not verify') unless leaf_node.verify(@suite, @group_id, committer)
-    current_leaf_node = tree.leaf_node_at(committer)
-    raise ArgumentError.new('UpdatePath leaf node reuses the committer\'s encryption key') if leaf_node.encryption_key == current_leaf_node.encryption_key
-    # 7.9.2: the parent hash in the new leaf is the one this tree and path imply
-    raise ArgumentError.new('UpdatePath leaf node parent hash does not verify') unless tree.verify_parent_hash_of_path(committer, update_path)
-    # 12.4.2, 16.7: the path's public keys are new to the tree and distinct from each other
-    path_keys = [leaf_node.encryption_key] + update_path.nodes.map(&:encryption_key)
-    raise ArgumentError.new('UpdatePath public keys are not distinct') unless path_keys.uniq.size == path_keys.size
-    tree_keys = tree.nodes.compact.map(&:public_encryption_key)
-    raise ArgumentError.new('a public key in the UpdatePath already appears in the tree') unless (path_keys & tree_keys).empty?
-    # 7.6: each node carries one ciphertext per member of its copath resolution, the new leaves excluded
-    copath_nodes = tree.copath_nodes_of_filtered_direct_path(committer * 2)
-    raise ArgumentError.new('malformed update path') unless copath_nodes.count == update_path.nodes.count
-    excluded = joiners.map { _1.leaf_index * 2 }
-    update_path.nodes.each_with_index do |node, i|
-      expected = (tree.resolution(copath_nodes[i]) - excluded).count
-      next if node.encrypted_path_secret.count == expected
-      raise ArgumentError.new("UpdatePath node #{i} has #{node.encrypted_path_secret.count} ciphertexts, expected #{expected}")
-    end
-  end
-
   # 6.1: the key that signed a message from this sender
   def sender_signature_key(sender)
     case sender.sender_type
@@ -550,9 +502,11 @@ class Melos::Group
     end
   end
 
-  # 12.3: apply proposals to tree, in the order GroupContextExtensions, Update, Remove, Add, PreSharedKey.
+  # 12.3: apply proposals to tree, in the order GroupContextExtensions, Update, Remove, Add, PreSharedKey,
+  # validating each leaf node that goes in (7.3, 10.1) and the resulting membership (12.2).
+  #   sending: we are the committer, so lifetimes are checked against the current time (7.3)
   # Returns [extensions, joiners (Joiner for each added member), psk_ids]
-  def apply_proposals(tree, proposals)
+  def apply_proposals(tree, proposals, sending:)
     of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
     types = proposals.map { |proposal, _sender| proposal.proposal_type }
     # 12.2, 13.2: a proposal type not supported by every member makes the list invalid; we support only the RFC's own types
@@ -560,14 +514,14 @@ class Melos::Group
     raise ArgumentError.new("unknown proposal types: #{unknown.map { '0x%04x' % _1 }.join(', ')}") unless unknown.empty?
     unsupported = types & [Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT]
     raise ArgumentError.new("unsupported proposal types: #{unsupported.map { Melos::Constants::ProposalType::NAMES[_1] }.join(', ')}") unless unsupported.empty?
-    # TODO: validate each proposal fully (12.1, 7.3, 10.1) and the list as a whole (12.2)
-
     extensions = @extensions
     of_type.(Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS).each do |proposal, _sender|
       Melos::Struct::Extension.check_unique_types!(proposal.group_context_extensions.extensions, 'GroupContextExtensions proposal')
       extensions = proposal.group_context_extensions.extensions
     end
     of_type.(Melos::Constants::ProposalType::UPDATE).each do |proposal, sender|
+      validate_leaf_node!(proposal.update.leaf_node, context: :update, leaf_index: sender, tree: tree, extensions: extensions,
+                                                     replacing: tree.leaf_node_at(sender), sending: sending)
       tree.update_leaf_node(sender, proposal.update.leaf_node)
     end
     of_type.(Melos::Constants::ProposalType::REMOVE).each do |proposal, _sender|
@@ -580,11 +534,13 @@ class Melos::Group
       # 10.1: the KeyPackage's version and cipher suite MUST match the group's
       raise ArgumentError.new("Add proposal's KeyPackage has version #{key_package.version}") unless key_package.version == Melos::Constants::Version::MLS10
       raise ArgumentError.new("Add proposal's KeyPackage is for cipher suite #{key_package.cipher_suite}") unless key_package.cipher_suite == @suite.suite_id
-      Melos::Struct::Extension.check_unique_types!(key_package.extensions, 'KeyPackage extensions')
-      Melos::Struct::Extension.check_unique_types!(key_package.leaf_node.extensions, 'KeyPackage leaf node extensions')
-      Joiner.new(tree.add_leaf_node(key_package.leaf_node), key_package)
+      leaf_index = tree.add_leaf_node(key_package.leaf_node)
+      validate_key_package!(key_package, tree: tree, leaf_index: leaf_index, extensions: extensions, sending: sending)
+      Joiner.new(leaf_index, key_package)
     end
     psk_ids = of_type.(Melos::Constants::ProposalType::PSK).map { |proposal, _sender| proposal.psk.psk }
+    # 12.2, 12.1.7: the members that remain must all be compatible with the new extensions and with each other
+    validate_members!(tree, extensions)
     [extensions, joiners, psk_ids]
   end
 
@@ -631,3 +587,5 @@ class Melos::Group
     end
   end
 end
+
+require_relative 'group/validation'

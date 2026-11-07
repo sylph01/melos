@@ -147,7 +147,7 @@ puts "[pass] duplicate PreSharedKey IDs and multiple GroupContextExtensions prop
 ## 12.4.2 / 7.6 / 7.9.2 UpdatePath checks, against the path of a genuine commit from Alice
 result = alice_group.create_commit
 path = result.commit.public_message.content.commit.path
-check = ->(update_path) { bob_group.send(:validate_update_path!, bob_group.ratchet_tree.dup, update_path, 0, []) }
+check = ->(update_path) { bob_group.send(:validate_update_path!, bob_group.ratchet_tree.dup, update_path, 0, [], bob_group.extensions) }
 check.(path) # the genuine path passes
 bob_leaf_key = bob_group.ratchet_tree.leaf_node_at(1).encryption_key
 reused_key = Melos::Struct::UpdatePath.create(leaf_node: path.leaf_node, nodes: [Melos::Struct::UpdatePathNode.create(encryption_key: bob_leaf_key, encrypted_path_secret: path.nodes[0].encrypted_path_secret)])
@@ -159,6 +159,61 @@ assert_raises(ArgumentError) { check.(old_leaf) } # wrong source, and the old en
 bob_group.process_message(wire(result.commit)) # and the genuine commit is still accepted end to end
 alice_group.merge_commit(result.staged)
 puts "[pass] an UpdatePath reusing a tree key, missing ciphertexts, or carrying a non-commit leaf is rejected"
+
+## 10.1 / 7.3 KeyPackage and LeafNode validation, as the sender of an Add
+now = Time.now.to_i
+expired = carol.create_key_package(lifetime: Melos::Struct::Lifetime.create(not_before: now - 200, not_after: now - 100))
+assert_raises(ArgumentError) { alice_group.create_add_proposal(expired.message) }
+# the maximum lifetime is the application's to set (7.2); a group with a one-minute maximum rejects the default week
+strict_group = alice.create_group("strict-#{suite_id}", max_leaf_node_lifetime: 60)
+assert_raises(ArgumentError) { strict_group.create_add_proposal(carol.create_key_package.message) }
+short_lived = carol.create_key_package(lifetime: Melos::Struct::Lifetime.create(not_before: now, not_after: now + 30))
+strict_group.create_add_proposal(short_lived.message)
+puts "[pass] a KeyPackage whose lifetime is expired, or longer than the group's maximum, is rejected"
+
+other_suite = Melos::Capabilities.new
+other_suite.cipher_suites = [suite_id + 1]
+assert_raises(ArgumentError) { alice_group.create_add_proposal(carol.create_key_package(capabilities: Melos::Struct::Capabilities.import(other_suite)).message) }
+no_credentials = Melos::Capabilities.new
+no_credentials.credentials = []
+assert_raises(ArgumentError) { alice_group.create_add_proposal(carol.create_key_package(capabilities: Melos::Struct::Capabilities.import(no_credentials)).message) }
+puts "[pass] a KeyPackage whose capabilities lack the group's cipher suite or its own credential type is rejected"
+
+good = carol.create_key_package
+tampered = good.key_package.raw.dup
+tampered[-1] = (tampered[-1].ord ^ 1).chr
+assert_raises(ArgumentError) { alice_group.create_add_proposal(Melos::Struct::KeyPackage.new(tampered)) }
+same_key = Melos::Struct::KeyPackage.create(cipher_suite: suite_id, init_key: good.key_package.leaf_node.encryption_key, leaf_node: good.key_package.leaf_node)
+same_key.sign(carol.signature_private_key)
+assert_raises(ArgumentError) { alice_group.create_add_proposal(same_key) }
+puts "[pass] a KeyPackage with a bad signature, or whose init_key equals its leaf encryption key, is rejected"
+
+leaf = good.key_package.leaf_node
+wrong_source = Melos::Struct::LeafNode.create(
+  encryption_key: leaf.encryption_key, signature_key: leaf.signature_key, credential: leaf.credential, capabilities: leaf.capabilities,
+  leaf_node_source: C::LeafNodeSource::UPDATE, lifetime: nil, parent_hash: nil, extensions: [], signature: nil
+)
+wrong_source.sign(suite, carol.signature_private_key, alice_group.group_id, 2)
+wrong_source_key_package = Melos::Struct::KeyPackage.create(cipher_suite: suite_id, init_key: good.key_package.init_key, leaf_node: wrong_source)
+wrong_source_key_package.sign(carol.signature_private_key)
+assert_raises(ArgumentError) { alice_group.create_add_proposal(wrong_source_key_package) }
+bob_group.process_message(wire(alice_group.create_add_proposal(good.message))) # the untouched KeyPackage is fine
+puts "[pass] a KeyPackage whose leaf node source is not key_package is rejected"
+
+## 12.1.7 / 11.1 required_capabilities
+rc_extension = ->(extension_types, credential_types) do
+  rc = Melos::Struct::RequiredCapabilities.create(extension_types: extension_types.pack('S>*'), proposal_types: '', credential_types: credential_types.pack('S>*'))
+  Melos::Struct::Extension.create(extension_type: C::ExtensionType::REQUIRED_CAPABILITIES, extension_data: rc.raw)
+end
+gce = ->(extensions) { Melos::Struct::Proposal.create(proposal_type: C::ProposalType::GROUP_CONTEXT_EXTENSIONS, group_context_extensions: Melos::Struct::GroupContextExtensions.create(extensions: extensions)) }
+assert_raises(ArgumentError) { alice_group.create_commit(inline_proposals: [gce.([rc_extension.([0xF001], [])])]) }
+result = alice_group.create_commit(inline_proposals: [gce.([rc_extension.([], [C::CredentialType::BASIC])])]) # also commits the pending Add of Carol
+bob_group.process_message(wire(result.commit))
+alice_group.merge_commit(result.staged)
+carol_group = carol.join_group(wire(result.welcome))
+assert_equal alice_group.epoch_authenticator, carol_group.epoch_authenticator
+assert_equal 1, alice_group.extensions.size
+puts "[pass] required_capabilities nobody supports is rejected; one everybody supports takes effect"
 
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
