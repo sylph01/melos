@@ -80,6 +80,11 @@ Service; melos should offer a hook or a documented default, not decide the polic
 
 ## 5. LeafNode validation (Section 7.3), for Add, Update, the Commit path leaf, and every leaf when joining
 
+Not checked on purpose: that a leaf's `capabilities.cipher_suites` lists the group's cipher suite. 7.3
+asks only that a leaf be "compatible with the group's parameters", and other implementations leave the
+suite out (every suite-7 vector in mls-implementations' `interop/passive` does). An added KeyPackage's
+own `cipher_suite` must still match the group's (4.1).
+
 | # | Requirement | RFC | Status | Code |
 |---|---|---|---|---|
 | 5.1 | Credential valid per 5.3.1 (Authentication Service), for leaves and external senders | 7.3, 5.3.1, 12.1.8.1 | done (hook) | `credential_validator:` option; default accepts basic credentials only; `Melos::Credential::X509` checks X.509 chains and the key match of 5.3; `#validate_external_senders!` |

@@ -169,10 +169,12 @@ class Melos::Group
                end
     raise Melos::ProtocolError.new('leaf node signature does not verify') unless verified
 
-    # 7.3, 11: compatible with the group's version, cipher suite, extensions and required capabilities
+    # 7.3, 11: compatible with the group's version, extensions and required capabilities. The leaf's
+    # cipher_suites list is not checked against the group's suite: 7.3 does not require it, other
+    # implementations leave it out (the interop vectors do), and an added KeyPackage's own cipher_suite
+    # is checked against the group's in validate_key_package!.
     capabilities = leaf_node.capabilities.export
     raise Melos::ProtocolError.new('leaf node does not support MLS 1.0') unless capabilities.versions.include?(Melos::Constants::Version::MLS10)
-    raise Melos::ProtocolError.new("leaf node does not support cipher suite #{@suite.suite_id}") unless capabilities.cipher_suites.include?(@suite.suite_id)
     others = []
     tree.each_leaf_node { |other, index| others << other unless index == leaf_index }
     validate_capabilities!(leaf_node, capabilities, extensions, others.map { _1.credential.credential_type })

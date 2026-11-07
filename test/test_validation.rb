@@ -171,13 +171,15 @@ short_lived = carol.create_key_package(lifetime: Melos::Struct::Lifetime.create(
 strict_group.create_add_proposal(short_lived.message)
 puts "[pass] a KeyPackage whose lifetime is expired, or longer than the group's maximum, is rejected"
 
+# 7.3 does not require a leaf's capabilities to list the group's cipher suite, and other implementations
+# leave it out, so such a KeyPackage is accepted (the KeyPackage's own cipher_suite must still match)
 other_suite = Melos::Capabilities.new
 other_suite.cipher_suites = [suite_id + 1]
-assert_raises(Melos::ProtocolError) { alice_group.create_add_proposal(carol.create_key_package(capabilities: Melos::Struct::Capabilities.import(other_suite)).message) }
+strict_group.create_add_proposal(carol.create_key_package(capabilities: Melos::Struct::Capabilities.import(other_suite), lifetime: Melos::Struct::Lifetime.create(not_before: now, not_after: now + 30)).message)
 no_credentials = Melos::Capabilities.new
 no_credentials.credentials = []
 assert_raises(Melos::ProtocolError) { alice_group.create_add_proposal(carol.create_key_package(capabilities: Melos::Struct::Capabilities.import(no_credentials)).message) }
-puts "[pass] a KeyPackage whose capabilities lack the group's cipher suite or its own credential type is rejected"
+puts "[pass] a KeyPackage whose capabilities lack its own credential type is rejected; one not listing the group's cipher suite is accepted"
 
 good = carol.create_key_package
 tampered = good.key_package.raw.dup
