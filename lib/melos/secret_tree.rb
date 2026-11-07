@@ -33,6 +33,18 @@ class Melos::SecretTree
       @skipped.keys
     end
 
+    # the ratchet's whole state (for persistence), as a Hash of binary strings and integers
+    def to_h
+      { secret: @secret, next_generation: @next_generation, skipped: @skipped.map { |generation, (key, nonce)| [generation, key, nonce] } }
+    end
+
+    def self.from_h(suite, hash, **options)
+      ratchet = new(suite, hash[:secret], **options)
+      ratchet.instance_variable_set(:@next_generation, hash[:next_generation])
+      ratchet.instance_variable_set(:@skipped, hash[:skipped].to_h { |generation, key, nonce| [generation, [key, nonce]] })
+      ratchet
+    end
+
     # derive the key and nonce of the current generation and step the ratchet
     def ratchet
       generation = @next_generation
@@ -74,6 +86,26 @@ class Melos::SecretTree
     @handshake_ratchets = []   # by leaf index
     @application_ratchets = [] # by leaf index
     populate(Melos::Tree.root(n_leaves), encryption_secret)
+  end
+
+  # the ratchet positions, skipped keys and options, as a Hash of binary strings and integers (6.3.1:
+  # a client that restarts without its ratchet state would reuse nonces)
+  def to_h
+    {
+      n_leaves: @n_leaves, options: @options,
+      handshake: @handshake_ratchets.map(&:to_h), application: @application_ratchets.map(&:to_h)
+    }
+  end
+
+  def self.from_h(suite, hash)
+    tree = allocate
+    options = hash[:options] || {}
+    tree.instance_variable_set(:@suite, suite)
+    tree.instance_variable_set(:@n_leaves, hash[:n_leaves])
+    tree.instance_variable_set(:@options, options)
+    tree.instance_variable_set(:@handshake_ratchets, hash[:handshake].map { Ratchet.from_h(suite, _1, **options) })
+    tree.instance_variable_set(:@application_ratchets, hash[:application].map { Ratchet.from_h(suite, _1, **options) })
+    tree
   end
 
   # sender side: the key and nonce of the next generation for this leaf and content type

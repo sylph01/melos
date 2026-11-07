@@ -47,6 +47,14 @@ class Melos::KeyPackageBundle
         Melos::Crypto.serialize_private_key(suite, encryption_key_pair))
   end
 
+  def to_h
+    { key_package: @key_package.raw, init_private_key: @init_private_key, encryption_private_key: @encryption_private_key }
+  end
+
+  def self.from_h(suite, hash)
+    new(suite, Melos::Struct::KeyPackage.new(hash[:key_package]), hash[:init_private_key], hash[:encryption_private_key])
+  end
+
   # 5.2: the KeyPackageRef a Welcome uses to address this KeyPackage
   def ref
     @key_package.ref(@suite)

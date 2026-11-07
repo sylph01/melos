@@ -245,6 +245,58 @@ class Melos::Group
     @epoch_secrets.export(label, context, length)
   end
 
+  ## Persistence
+
+  # version of the Hash produced by #to_h
+  STATE_FORMAT = 1
+
+  # The whole state of this member's view of the group, as a Hash whose keys are Symbols and whose values are
+  # binary Strings, Integers, true/false/nil, Arrays and such Hashes: secrets, private keys and ratchet
+  # positions included, so a restored group never reuses a nonce (6.3.1). Store it encrypted; that is
+  # the application's job. Melos::Persistence turns it into JSON.
+  # The credential_validator and external_proposal_validator procs are not included: pass them to .from_h again.
+  #   include_external_psks: false when the PSKs are kept elsewhere (Melos::Client does)
+  def to_h(include_external_psks: true)
+    {
+      format: STATE_FORMAT,
+      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch, leaf_index: @leaf_index,
+      signature_private_key: @signature_private_key,
+      ratchet_tree: @ratchet_tree.raw, private_tree: @private_tree.to_a,
+      extensions: @extensions.map(&:raw),
+      confirmed_transcript_hash: @confirmed_transcript_hash, interim_transcript_hash: @interim_transcript_hash,
+      epoch_secrets: @epoch_secrets.to_h,
+      resumption_psks: @resumption_psks.to_a,
+      external_psks: include_external_psks ? @external_psks.to_a : nil,
+      pending_proposals: @pending_proposals.map { |ref, authenticated_content| [ref, authenticated_content.raw] },
+      pending_updates: @pending_updates.to_a,
+      past_epochs: @past_epochs.map do |epoch, past|
+        [epoch, { epoch_secrets: past.epoch_secrets.to_h, group_context: past.group_context.raw, ratchet_tree: past.ratchet_tree.raw }]
+      end,
+      active: @active,
+      max_leaf_node_lifetime: @max_leaf_node_lifetime, max_past_epochs: @max_past_epochs
+    }
+  end
+
+  # A group from #to_h.
+  #   external_psks: the Hash to share with the restored group (a Client passes its own); defaults to the saved ones
+  #   options: credential_validator:, external_proposal_validator:, as for .create
+  def self.from_h(hash, external_psks: nil, **options)
+    raise ArgumentError.new("unknown group state format #{hash[:format]}") unless hash[:format] == STATE_FORMAT
+    suite = Melos::Crypto::CipherSuite.new(hash[:cipher_suite])
+    group = new(
+      suite: suite, group_id: hash[:group_id], epoch: hash[:epoch], leaf_index: hash[:leaf_index],
+      signature_private_key: hash[:signature_private_key],
+      ratchet_tree: Melos::RatchetTree.parse(suite, hash[:ratchet_tree]), private_tree: Melos::PrivateTree.from_a(hash[:private_tree]),
+      extensions: hash[:extensions].map { Melos::Struct::Extension.new(_1) },
+      confirmed_transcript_hash: hash[:confirmed_transcript_hash], interim_transcript_hash: hash[:interim_transcript_hash],
+      epoch_secrets: Melos::EpochSecrets.from_h(suite, hash[:epoch_secrets]),
+      external_psks: external_psks || (hash[:external_psks] || []).to_h,
+      max_leaf_node_lifetime: hash[:max_leaf_node_lifetime], max_past_epochs: hash[:max_past_epochs], **options
+    )
+    group.send(:restore_state, hash)
+    group
+  end
+
   ## Receiving messages (6, 12.4)
 
   # Unprotect an MLSMessage sent in this group and verify its signature. Handshake messages must be
@@ -589,6 +641,21 @@ class Melos::Group
       )
     end
     @past_epochs.delete_if { |epoch, _| epoch <= @epoch - @max_past_epochs }
+  end
+
+  # the parts of #to_h that .new does not take
+  def restore_state(hash)
+    @resumption_psks = hash[:resumption_psks].to_h
+    @pending_proposals = hash[:pending_proposals].to_h { |ref, raw| [ref, Melos::Struct::AuthenticatedContent.new(raw)] }
+    @pending_updates = hash[:pending_updates].to_h
+    @past_epochs = hash[:past_epochs].to_h do |epoch, past|
+      [epoch, PastEpoch.new(
+        epoch_secrets: Melos::EpochSecrets.from_h(@suite, past[:epoch_secrets]),
+        group_context: Melos::Struct::GroupContext.new(past[:group_context]),
+        ratchet_tree: Melos::RatchetTree.parse(@suite, past[:ratchet_tree])
+      )]
+    end
+    @active = hash[:active]
   end
 
   def ensure_active!

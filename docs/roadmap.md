@@ -146,7 +146,7 @@ no group state (`create_add_proposal`, `create_remove_proposal`, `create_psk_pro
 Add. Authorization (12.1.8) is the `external_proposal_validator:` group option, accepting by default.
 Tests in `test/test_external_senders.rb`.
 
-## 8. Persistence of client and group state (M)
+## 8. Persistence of client and group state (M) — done
 
 **RFC.** None, but 6.3.1 requires persistent ratchet state to avoid nonce reuse, so a client that
 restarts without it is unsafe.
@@ -162,6 +162,15 @@ Encryption at rest is out of scope and should be stated.
 
 **Test.** Save and restore both members between every step of the round-trip test; messages
 encrypted before and after a restore decrypt.
+
+**Done as.** `Group#to_h(include_external_psks:)` / `Group.from_h(hash, external_psks:, **hooks)` and
+`Client#to_h` / `Client.from_h(hash, **hooks)`, built on `to_h` / `from_h` of `EpochSecrets`,
+`SecretTree` and its `Ratchet`s, `KeyPackageBundle`, and `PrivateTree#to_a`. The Hashes have Symbol
+keys and binary String values, plus a `format:` version. Data maps are arrays of pairs, so keys keep
+their types. `Melos::Persistence` gives JSON with hex strings (`dump_client`, `load_client`,
+`dump_group`, `load_group`); Marshal works on the Hash as it is. The procs (`credential_validator:`,
+`external_proposal_validator:`) are passed again on load. A `StagedCommit` is not part of the state:
+merge or discard it before saving. Tests in `test/test_persistence.rb`.
 
 ## 9. X.509 credentials (M, application-dependent) — RFC 5.3, 5.3.1, 13.3
 
@@ -244,5 +253,5 @@ the runner's scripts.
 
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6 → 7~~ → 8 → 10 → 11 → 9 → 12, with interop (12) ready to start,
+~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8~~ → 10 → 11 → 9 → 12, with interop (12) ready to start,
 since it is the strongest check on everything else and takes calendar time rather than code.

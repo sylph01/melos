@@ -20,6 +20,7 @@ As of version 0.1.0, this implements:
 - Update proposals, commits without an UpdatePath where the RFC allows them, exporters
 - The deletion schedule of Section 9.2 (as far as Ruby allows: references are dropped, strings are not zeroized)
 - External senders and new-member proposals (`Melos::ExternalSender`, `Client#create_new_member_proposal`)
+- Saving and restoring client and group state (`to_h` / `from_h`, JSON through `Melos::Persistence`)
 - Out-of-order application messages and messages from recent epochs, with bounds on both (Section 15.3)
 - Most MUST-level validations of the RFC; [docs/validation.md](docs/validation.md) maps each one to the code
 - All test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md),
@@ -29,7 +30,6 @@ It does not yet implement:
 
 - ReInit, external commits (ExternalInit), resumption PSKs, subgroup branching
 - Credential validation beyond basic credentials (an application hook, `credential_validator:`, is provided)
-- Persistence of client and group state
 - Interop testing against other implementations
 
 ## Usage
@@ -65,6 +65,14 @@ group.process_message(message).content.application_data # => "hello"
 
 `Melos::Group` holds one member's view of one group. `Melos::Client` holds the long-lived identity,
 the external PSKs and the KeyPackages it has published.
+
+State can be saved and restored, which a client must do to avoid reusing nonces after a restart
+(RFC 9420 6.3.1). The state holds private keys; encrypting it at rest is up to the application.
+
+```ruby
+json = Melos::Persistence.dump_client(alice)  # or alice.to_h, for Marshal or MessagePack
+alice = Melos::Persistence.load_client(json)  # pass credential_validator: etc. again here
+```
 
 ## Tests
 

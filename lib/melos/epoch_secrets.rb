@@ -128,6 +128,21 @@ class Melos::EpochSecrets
     self
   end
 
+  # the epoch's remaining secrets and its secret tree's state, as a Hash of binary strings and integers
+  def to_h
+    {
+      epoch_secret: @epoch_secret, joiner_secret: @joiner_secret, psk_secret: @psk_secret, n_leaves: @n_leaves,
+      derived: @derived.dup, secret_tree_options: @secret_tree_options, secret_tree: @secret_tree&.to_h
+    }
+  end
+
+  def self.from_h(suite, hash)
+    epoch_secrets = new(suite, epoch_secret: hash[:epoch_secret], joiner_secret: hash[:joiner_secret], psk_secret: hash[:psk_secret],
+                               n_leaves: hash[:n_leaves], derived: hash[:derived], secret_tree_options: hash[:secret_tree_options] || {})
+    epoch_secrets.instance_variable_set(:@secret_tree, Melos::SecretTree.from_h(suite, hash[:secret_tree])) if hash[:secret_tree]
+    epoch_secrets
+  end
+
   # 9: this epoch's secret tree, built on first use
   def secret_tree
     raise ArgumentError.new('n_leaves is needed to build the secret tree') if @n_leaves.nil?

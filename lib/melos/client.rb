@@ -87,7 +87,41 @@ class Melos::Client
     @groups[group.group_id] = group
   end
 
+  # version of the Hash produced by #to_h
+  STATE_FORMAT = 1
+
+  # The client's whole state, its groups included, in the form Melos::Group#to_h describes.
+  # Private keys are in it: store it encrypted.
+  def to_h
+    {
+      format: STATE_FORMAT,
+      cipher_suite: @cipher_suite.suite_id,
+      signature_private_key: signature_private_key,
+      credential: @credential.raw,
+      external_psks: @external_psks.to_a,
+      key_packages: @key_packages.map { |ref, bundle| [ref, bundle.to_h] },
+      groups: @groups.map { |group_id, group| [group_id, group.to_h(include_external_psks: false)] }
+    }
+  end
+
+  # A client from #to_h. group_options (credential_validator:, external_proposal_validator:) go to every group.
+  def self.from_h(hash, **group_options)
+    raise ArgumentError.new("unknown client state format #{hash[:format]}") unless hash[:format] == STATE_FORMAT
+    client = allocate
+    client.send(:restore_state, hash, group_options)
+    client
+  end
+
   private
+
+  def restore_state(hash, group_options)
+    @cipher_suite = Melos::Crypto::CipherSuite.new(hash[:cipher_suite])
+    @signature_key_pair = @cipher_suite.pkey.deserialize_private_signature_key(hash[:signature_private_key])
+    @credential = Melos::Struct::Credential.new(hash[:credential])
+    @external_psks = hash[:external_psks].to_h
+    @key_packages = hash[:key_packages].to_h { |ref, bundle| [ref, Melos::KeyPackageBundle.from_h(@cipher_suite, bundle)] }
+    @groups = hash[:groups].to_h { |group_id, group| [group_id, Melos::Group.from_h(group, external_psks: @external_psks, **group_options)] }
+  end
 
   # 12.4.3: a group_id MUST be unique among the groups this client is participating in;
   # a group this client has been removed from no longer counts

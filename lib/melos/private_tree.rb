@@ -28,6 +28,15 @@ class Melos::PrivateTree
     self.class.new(@keys.dup)
   end
 
+  # [[node_index, private key], ...]
+  def to_a
+    @keys.sort.to_a
+  end
+
+  def self.from_a(pairs)
+    new(pairs.to_h)
+  end
+
   # 7.4: starting with path_secret at start_node_index, derive the node private key there and at
   # every node up its filtered direct path on ratchet_tree, each from the next path secret
   def set_path_secret(ratchet_tree, start_node_index, path_secret)
