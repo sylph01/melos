@@ -155,43 +155,43 @@ class Melos::Crypto
       when 1 # MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
         @level = 128
         @digest = OpenSSL::Digest.new('sha256')
-        @hpke = HPKE.new(:x25519, :sha256, :sha256, :aes_128_gcm)
+        @hpke = HPKE.new(HPKE::DHKEM_X25519_HKDF_SHA256, HPKE::HKDF_SHA256, HPKE::AES_128_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::X25519
       when 2 # MLS_128_DHKEMP256_AES128GCM_SHA256_P256
         @level = 128
         @digest = OpenSSL::Digest.new('sha256')
-        @hpke = HPKE.new(:p_256, :sha256, :sha256, :aes_128_gcm)
+        @hpke = HPKE.new(HPKE::DHKEM_P256_HKDF_SHA256, HPKE::HKDF_SHA256, HPKE::AES_128_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::P256
       when 3 # MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519
         @level = 128
         @digest = OpenSSL::Digest.new('sha256')
-        @hpke = HPKE.new(:x25519, :sha256, :sha256, :chacha20_poly1305)
+        @hpke = HPKE.new(HPKE::DHKEM_X25519_HKDF_SHA256, HPKE::HKDF_SHA256, HPKE::CHACHA20_POLY1305)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::X25519
       when 4 # MLS_256_DHKEMX448_AES256GCM_SHA512_Ed448
         @level = 256
         @digest = OpenSSL::Digest.new('sha512')
-        @hpke = HPKE.new(:x448, :sha512, :sha512, :aes_256_gcm)
+        @hpke = HPKE.new(HPKE::DHKEM_X448_HKDF_SHA512, HPKE::HKDF_SHA512, HPKE::AES_256_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::X448
       when 5 # MLS_256_DHKEMP521_AES256GCM_SHA512_P521
         @level = 256
         @digest = OpenSSL::Digest.new('sha512')
-        @hpke = HPKE.new(:p_521, :sha512, :sha512, :aes_256_gcm)
+        @hpke = HPKE.new(HPKE::DHKEM_P521_HKDF_SHA512, HPKE::HKDF_SHA512, HPKE::AES_256_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::P521
       when 6 # MLS_256_DHKEMX448_CHACHA20POLY1305_SHA512_Ed448
         @level = 256
         @digest = OpenSSL::Digest.new('sha512')
-        @hpke = HPKE.new(:x448, :sha512, :sha512, :chacha20_poly1305)
+        @hpke = HPKE.new(HPKE::DHKEM_X448_HKDF_SHA512, HPKE::HKDF_SHA512, HPKE::CHACHA20_POLY1305)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::X448
       when 7 # MLS_256_DHKEMP384_AES256GCM_SHA384_P384
         @level = 256
         @digest = OpenSSL::Digest.new('sha384')
-        @hpke = HPKE.new(:p_384, :sha384, :sha384, :aes_256_gcm)
+        @hpke = HPKE.new(HPKE::DHKEM_P384_HKDF_SHA384, HPKE::HKDF_SHA384, HPKE::AES_256_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::P384
       end

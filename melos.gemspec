@@ -31,7 +31,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Uncomment to register a new dependency of your gem
-  spec.add_dependency "hpke", "~> 0.3.1"
+  spec.add_dependency "hpke", "~> 1.0"
   spec.add_dependency 'minitest', '~> 5.12', '>= 5.12.2'
 
   # For more information and examples about making a new gem, check out our

@@ -2,7 +2,7 @@ PATH
   remote: .
   specs:
     melos (0.0.2)
-      hpke (~> 0.3.1)
+      hpke (~> 1.0)
       minitest (~> 5.12, >= 5.12.2)
 
 GEM
@@ -10,8 +10,8 @@ GEM
   specs:
     diff-lcs (1.6.2)
     erb (6.0.7)
-    hpke (0.3.1)
-      openssl (~> 3.3.0, >= 3.0)
+    hpke (1.0.2)
+      openssl (~> 4.0.0, >= 3.0)
     io-console (0.9.5)
     irb (1.18.0)
       pp (>= 0.6.0)
@@ -20,7 +20,7 @@ GEM
       reline (>= 0.4.2)
     logger (1.7.0)
     minitest (5.27.0)
-    openssl (3.3.3)
+    openssl (4.0.2)
     pp (0.6.4)
       prettyprint
     prettyprint (0.2.1)
