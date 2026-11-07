@@ -568,8 +568,8 @@ class Melos::Struct::GroupInfo < Melos::Struct::Base
     )
   end
 
-  def sign(suite, signer_private)
-    Melos::Crypto.sign_with_label(suite, signer_private_key, "GroupInfoTBS", group_info_tbs.raw)
+  def sign(suite, signer_private_key)
+    @signature = Melos::Crypto.sign_with_label(suite, signer_private_key, "GroupInfoTBS", group_info_tbs.raw)
   end
 
   def verify(suite, signer_public_key)
@@ -724,6 +724,12 @@ class Melos::Struct::FramedContentAuthData < Melos::Struct::Base
     end
     instance
   end
+
+  # a commit's confirmation tag is computed after signing, once the next epoch's key schedule is known (8.2)
+  def confirmation_tag=(tag)
+    raise ArgumentError.new('only a commit carries a confirmation tag') unless @content_type == Melos::Constants::ContentType::COMMIT
+    @confirmation_tag = tag
+  end
 end
 
 class Melos::Struct::FramedContent < Melos::Struct::Base
@@ -805,15 +811,15 @@ class Melos::Struct::AuthenticatedContent < Melos::Struct::Base
     new_instance
   end
 
-  # populate auth with values
-  def sign(suite, signature_private_key, group_context)
+  # populate auth with the signature (6.1); a commit's confirmation_tag may be given here or set on auth later
+  def sign(suite, signature_private_key, group_context, confirmation_tag: nil)
     raise ArgumentError.new('Application data cannot be sent as a PublicMessage') if wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE && content.content_type == Melos::Constants::ContentType::APPLICATION
     content_tbs = content.content_tbs(Melos::Constants::Version::MLS10, wire_format, group_context)
     signature = Melos::Crypto.sign_with_label(suite, signature_private_key, "FramedContentTBS", content_tbs)
     @auth = Melos::Struct::FramedContentAuthData.create(
       signature: signature,
       content_type: content.content_type,
-      confirmation_tag: nil
+      confirmation_tag: confirmation_tag
     )
   end
 end
@@ -1055,9 +1061,21 @@ class Melos::Struct::MLSMessage < Melos::Struct::Base
     [:key_package,     :select, ->(ctx){ctx[:wire_format] == Melos::Constants::WireFormat::MLS_KEY_PACKAGE}, :class, Melos::Struct::KeyPackage]
   ]
 
-  def verify(suite, signer_public_key, group_context)
-    if wire_format == Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
-      public_message.verify(suite, signer_public_key, version, wire_format, group_context)
-    end
+  # wrap exactly one of the message types; the wire format follows from which one is given
+  def self.create(public_message: nil, private_message: nil, welcome: nil, group_info: nil, key_package: nil)
+    given = {
+      public_message: [Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, public_message],
+      private_message: [Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, private_message],
+      welcome: [Melos::Constants::WireFormat::MLS_WELCOME, welcome],
+      group_info: [Melos::Constants::WireFormat::MLS_GROUP_INFO, group_info],
+      key_package: [Melos::Constants::WireFormat::MLS_KEY_PACKAGE, key_package]
+    }.reject { |_, (_, value)| value.nil? }
+    raise ArgumentError.new('exactly one message must be given') unless given.size == 1
+    field, (wire_format, value) = given.first
+    instance = allocate
+    instance.instance_variable_set(:@version, Melos::Constants::Version::MLS10)
+    instance.instance_variable_set(:@wire_format, wire_format)
+    instance.instance_variable_set("@#{field}", value)
+    instance
   end
 end

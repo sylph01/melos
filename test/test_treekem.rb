@@ -91,10 +91,19 @@ vectors.each_with_index do |vector, tree_index|
 
     ## Create a new UpdatePath from the sender, then verify it from every other leaf
     sender_private_tree = private_tree.dup
-    result = ratchet_tree.create_update_path(sender_private_tree, sender, signature_privs[sender], group_id, group_context)
+    # create_update_path replaces the tree hash in the given GroupContext with that of the tree after the merge
+    result = ratchet_tree.create_update_path(sender_private_tree, sender, signature_privs[sender], group_context)
 
     another_new_tree = ratchet_tree.dup
     another_new_tree.merge_update_path(sender, result[:update_path])
+    provisional_group_context = Melos::Struct::GroupContext.create(
+      cipher_suite: vector['cipher_suite'],
+      group_id: group_id,
+      epoch: epoch,
+      tree_hash: another_new_tree.root_tree_hash,
+      confirmed_transcript_hash: confirmed_transcript_hash,
+      extensions: []
+    )
     assert_equal true, another_new_tree.verify_parent_hash_of_path(sender, result[:update_path])
     puts "[pass] New update path is parent-hash valid relative to the tree it was merged into"
     # create_update_path wrote the sender's new leaf and path private keys into its private tree
@@ -105,7 +114,7 @@ vectors.each_with_index do |vector, tree_index|
       next if leaf_index == sender
       puts "With new update path, sender #{sender}, receiver #{leaf_index}:"
       receiver_private_tree = private_tree.dup
-      decrypted_path_secret = another_new_tree.decrypt_path_secret(receiver_private_tree, result[:update_path], sender, leaf_index, group_context)
+      decrypted_path_secret = another_new_tree.decrypt_path_secret(receiver_private_tree, result[:update_path], sender, leaf_index, provisional_group_context)
       assert_equal result[:commit_secret], another_new_tree.calculate_commit_secret(result[:update_path], sender, leaf_index, decrypted_path_secret)
       puts "[pass] Verify that commit_secret is the resulting commit secret"
     end

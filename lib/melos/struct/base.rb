@@ -12,6 +12,16 @@ class Melos::Struct::Base
     self
   end
 
+  # build an instance from its field values. Structs with defaults or fields that
+  # depend on an enclosing struct define their own create.
+  def self.create(**fields)
+    unknown = fields.keys - self::STRUCT.map(&:first)
+    raise ArgumentError.new("#{name}: unknown fields #{unknown.join(', ')}") unless unknown.empty?
+    instance = allocate
+    fields.each { |field, value| instance.instance_variable_set("@#{field}", value) }
+    instance
+  end
+
   def raw
     buf = ''
     context = field_context

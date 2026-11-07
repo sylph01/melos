@@ -13,13 +13,20 @@ require_relative 'struct/structs'
 # derived), this member's private state (leaf index, private tree, signature key) and the
 # current epoch's key schedule.
 class Melos::Group
+  # a member added by a commit: where it landed in the tree, and the KeyPackage it joins with
+  Joiner = Struct.new(:leaf_index, :key_package)
+
   # 12.4.2: the state of the next epoch, computed from a Commit but not yet in effect.
-  # It is produced by #stage_commit and applied by #merge_commit.
+  # It is produced by #stage_commit (received commits) or #create_commit (our own) and applied by #merge_commit.
   StagedCommit = Struct.new(
     :ratchet_tree, :private_tree, :extensions, :confirmed_transcript_hash, :interim_transcript_hash,
-    :epoch_secrets, :group_context, :joiners,
+    :epoch_secrets, :group_context, :confirmation_tag, :joiners, :path_secrets, :psk_ids,
     keyword_init: true
   )
+
+  # what #create_commit produces: the Commit message to send, the Welcome for any joiners (or nil),
+  # and the staged state to merge once the Delivery Service has accepted the commit
+  CommitResult = Struct.new(:commit, :welcome, :staged, keyword_init: true)
 
   attr_reader :suite, :group_id, :epoch, :leaf_index, :ratchet_tree, :private_tree, :extensions,
               :confirmed_transcript_hash, :interim_transcript_hash, :epoch_secrets, :resumption_psks, :external_psks
@@ -40,7 +47,7 @@ class Melos::Group
     @epoch_secrets = epoch_secrets
     @external_psks = external_psks # psk_id -> psk
     @resumption_psks = { epoch => epoch_secrets.resumption_psk } # epoch -> resumption_psk (8.4)
-    @pending_proposals = {} # ProposalRef -> AuthenticatedContent received in the current epoch (12.4)
+    @pending_proposals = {} # ProposalRef -> AuthenticatedContent, sent or received in the current epoch (12.4)
     @group_context = nil
   end
 
@@ -195,7 +202,7 @@ class Melos::Group
     authenticated_content
   end
 
-  # 12.4: remember a proposal received in this epoch so a later Commit can reference it
+  # 12.4: remember a proposal of this epoch so a Commit can reference it
   def process_proposal(authenticated_content)
     raise ArgumentError.new('not a proposal') unless authenticated_content.content.content_type == Melos::Constants::ContentType::PROPOSAL
     @pending_proposals[Melos::Crypto.make_proposal_ref(@suite, authenticated_content.raw)] = authenticated_content
@@ -205,60 +212,9 @@ class Melos::Group
     merge_commit(stage_commit(authenticated_content))
   end
 
-  # 12.4.2: compute the next epoch's state from a Commit without changing this group yet
+  # 12.4.2: compute the next epoch's state from a received Commit without changing this group yet
   def stage_commit(authenticated_content)
-    content = authenticated_content.content
-    raise ArgumentError.new('not a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
-    raise ArgumentError.new("commit is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == @epoch
-    # TODO: external and new-member commits
-    raise ArgumentError.new('only commits from members are supported') unless content.sender.sender_type == Melos::Constants::SenderType::MEMBER
-    committer = content.sender.leaf_index
-    raise ArgumentError.new('cannot stage our own commit this way yet') if committer == @leaf_index # TODO: done in create_commit
-    commit = content.commit
-
-    proposals = resolve_proposals(commit, committer)
-    # 12.4: the path is required if the proposal list is empty or contains any of these
-    path_required = proposals.empty? || proposals.any? do |proposal, _sender|
-      [Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
-       Melos::Constants::ProposalType::EXTERNAL_INIT, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS].include?(proposal.proposal_type)
-    end
-    raise ArgumentError.new('commit must have a path') if commit.path.nil? && path_required
-
-    tree = @ratchet_tree.dup
-    private_tree = @private_tree.dup
-    extensions, joiners, psk_ids = apply_proposals(tree, proposals)
-
-    if commit.path
-      tree.merge_update_path(committer, commit.path)
-      # the UpdatePath is encrypted with the provisional GroupContext: new epoch and tree, old transcript hash
-      provisional_group_context = Melos::Struct::GroupContext.create(
-        cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
-        tree_hash: tree.root_tree_hash, confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions
-      )
-      path_secret = tree.decrypt_path_secret(private_tree, commit.path, committer, @leaf_index, provisional_group_context, joiners)
-      commit_secret = tree.calculate_commit_secret(commit.path, committer, @leaf_index, path_secret)
-    else
-      commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
-    end
-
-    # 8.2: transcript hashes
-    confirmed_transcript_hash = Melos::Crypto.hash(@suite, @interim_transcript_hash + authenticated_content.confirmed_transcript_hash_input.raw)
-    new_group_context = Melos::Struct::GroupContext.create(
-      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
-      tree_hash: tree.root_tree_hash, confirmed_transcript_hash: confirmed_transcript_hash, extensions: extensions
-    )
-
-    # 8: the next epoch's key schedule, then check the committer's confirmation tag against it
-    epoch_secrets = @epoch_secrets.next(commit_secret, psk_secret_for(psk_ids), new_group_context, n_leaves: tree.n_leaves)
-    expected_tag = Melos::Crypto.mac(@suite, epoch_secrets.confirmation_key, confirmed_transcript_hash)
-    raise ArgumentError.new('confirmation tag does not verify') unless authenticated_content.auth.confirmation_tag == expected_tag
-
-    StagedCommit.new(
-      ratchet_tree: tree, private_tree: private_tree, extensions: extensions,
-      confirmed_transcript_hash: confirmed_transcript_hash,
-      interim_transcript_hash: self.class.interim_transcript_hash(@suite, confirmed_transcript_hash, authenticated_content.auth.confirmation_tag),
-      epoch_secrets: epoch_secrets, group_context: new_group_context, joiners: joiners
-    )
+    stage(authenticated_content, own_path: nil)
   end
 
   # 12.4.2: make a staged commit the current state; the group moves to the next epoch
@@ -276,37 +232,169 @@ class Melos::Group
     self
   end
 
-  ## Sending messages
-  # TODO: these predate the staged-commit flow; create_empty_commit uses a placeholder confirmation
-  # tag and does not advance the epoch. They are rebuilt on #protect in the next step.
+  ## Sending messages (6)
 
-  def create_add_proposal(key_package)
-    add = Melos::Struct::Add.allocate
-    add.key_package = key_package
-    add_proposal = Melos::Struct::Proposal.allocate
-    add_proposal.proposal_type = Melos::Constants::ProposalType::ADD
-    add_proposal.add = add
-    create_protected_public_message(framed_content(Melos::Constants::ContentType::PROPOSAL, add_proposal))
+  # Frame, sign and protect content for the wire in the current epoch. Returns a Melos::Struct::MLSMessage.
+  #   content_type: Melos::Constants::ContentType; content: application data (String), Proposal or Commit
+  def protect(content_type, content, wire_format: Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, authenticated_data: '', padding_size: 0)
+    protect_authenticated_content(frame_and_sign(content_type, content, wire_format: wire_format, authenticated_data: authenticated_data), padding_size: padding_size)
   end
 
-  def create_remove_proposal(target_leaf_index)
-    # TODO: check if target leaf index exists
-    remove = Melos::Struct::Remove.allocate
-    remove.removed = target_leaf_index
-    remove_proposal = Melos::Struct::Proposal.allocate
-    remove_proposal.proposal_type = Melos::Constants::ProposalType::REMOVE
-    remove_proposal.remove = remove
-    create_protected_public_message(framed_content(Melos::Constants::ContentType::PROPOSAL, remove_proposal))
+  # 6.1: application data is always sent as a PrivateMessage
+  def create_application_message(data, authenticated_data: '', padding_size: 0)
+    protect(Melos::Constants::ContentType::APPLICATION, data,
+            wire_format: Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE, authenticated_data: authenticated_data, padding_size: padding_size)
   end
 
-  def create_empty_commit
-    # empty commit = update path only
-    result = @ratchet_tree.create_update_path(@private_tree.dup, @leaf_index, @signature_private_key, @group_id, group_context)
-    commit = Melos::Struct::Commit.create(proposals: [], path: result[:update_path])
-    create_protected_public_message(framed_content(Melos::Constants::ContentType::COMMIT, commit))
+  # 12.1: send a Proposal; it is also remembered here so that our own Commit can reference it
+  def create_proposal(proposal, wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, authenticated_data: '', padding_size: 0)
+    authenticated_content = frame_and_sign(Melos::Constants::ContentType::PROPOSAL, proposal, wire_format: wire_format, authenticated_data: authenticated_data)
+    process_proposal(authenticated_content)
+    protect_authenticated_content(authenticated_content, padding_size: padding_size)
+  end
+
+  # 12.1.1: key_package is the new member's KeyPackage, or the MLSMessage carrying it
+  def create_add_proposal(key_package, **options)
+    key_package = key_package.key_package if key_package.is_a?(Melos::Struct::MLSMessage)
+    add = Melos::Struct::Add.create(key_package: key_package)
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::ADD, add: add), **options)
+  end
+
+  # 12.1.3
+  def create_remove_proposal(removed_leaf_index, **options)
+    raise ArgumentError.new("leaf #{removed_leaf_index} is blank") if @ratchet_tree.leaf_node_at(removed_leaf_index).nil?
+    remove = Melos::Struct::Remove.create(removed: removed_leaf_index)
+    create_proposal(Melos::Struct::Proposal.create(proposal_type: Melos::Constants::ProposalType::REMOVE, remove: remove), **options)
+  end
+
+  # 12.4: commit the proposals of this epoch (those sent or received, by reference, plus inline_proposals by value)
+  # with a fresh UpdatePath. Returns a CommitResult; call #merge_commit(result.staged) once the Delivery Service
+  # has accepted the commit, and send result.welcome to the new members if there are any.
+  def create_commit(inline_proposals: [], wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE, authenticated_data: '',
+                    padding_size: 0, include_ratchet_tree: true)
+    proposal_or_refs =
+      @pending_proposals.keys.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::REFERENCE, proposal: nil, reference: _1) } +
+      inline_proposals.map { Melos::Struct::ProposalOrRef.create(type: Melos::Constants::ProposalOrRefType::PROPOSAL, proposal: _1, reference: nil) }
+    proposals = resolve_proposals(proposal_or_refs, @leaf_index)
+
+    # 12.4.2: the UpdatePath is built on the tree after the proposals, and not encrypted to the leaves being added
+    tree = @ratchet_tree.dup
+    private_tree = @private_tree.dup
+    extensions, joiners, _psk_ids = apply_proposals(tree, proposals)
+    # TODO: the path may be left out when 12.4 does not require it
+    provisional_group_context = Melos::Struct::GroupContext.create(
+      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
+      tree_hash: '', confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions # tree_hash is filled in by create_update_path
+    )
+    path = tree.create_update_path(private_tree, @leaf_index, @signature_private_key, provisional_group_context, joiners.map { _1.leaf_index * 2 })
+
+    commit = Melos::Struct::Commit.create(proposals: proposal_or_refs, path: path[:update_path])
+    authenticated_content = frame_and_sign(Melos::Constants::ContentType::COMMIT, commit, wire_format: wire_format, authenticated_data: authenticated_data)
+    staged = stage(authenticated_content, own_path: { private_tree: private_tree, commit_secret: path[:commit_secret], path_secrets: path[:path_secrets] })
+    authenticated_content.auth.confirmation_tag = staged.confirmation_tag
+
+    CommitResult.new(
+      commit: protect_authenticated_content(authenticated_content, padding_size: padding_size),
+      welcome: staged.joiners.empty? ? nil : create_welcome(staged, include_ratchet_tree: include_ratchet_tree),
+      staged: staged
+    )
+  end
+
+  # 12.4.3.1: the Welcome for the members a staged commit adds
+  def create_welcome(staged, include_ratchet_tree: true)
+    extensions = []
+    extensions << Melos::Struct::Extension.create(extension_type: Melos::Constants::ExtensionType::RATCHET_TREE, extension_data: staged.ratchet_tree.raw) if include_ratchet_tree
+    group_info = Melos::Struct::GroupInfo.create(
+      group_context: staged.group_context, extensions: extensions, confirmation_tag: staged.confirmation_tag, signer: @leaf_index, signature: nil
+    )
+    group_info.sign(@suite, @signature_private_key)
+    welcome_key, welcome_nonce = staged.epoch_secrets.welcome_key_and_nonce
+    encrypted_group_info = Melos::Crypto.aead_encrypt(@suite, welcome_key, welcome_nonce, "", group_info.raw)
+
+    secrets = staged.joiners.map do |joiner|
+      path_secret = nil
+      if staged.path_secrets
+        # the joiner gets the path secret of the node where its direct path meets ours
+        common_ancestor = Melos::Tree.common_ancestor_semantic(joiner.leaf_index * 2, @leaf_index * 2, staged.ratchet_tree.n_leaves)
+        path_secret = Melos::Struct::PathSecret.create(path_secret: staged.path_secrets.fetch(common_ancestor))
+      end
+      group_secrets = Melos::Struct::GroupSecrets.create(joiner_secret: staged.epoch_secrets.joiner_secret, path_secret: path_secret, psks: staged.psk_ids)
+      kem_output, ciphertext = Melos::Crypto.encrypt_with_label(@suite, joiner.key_package.init_key, "Welcome", encrypted_group_info, group_secrets.raw)
+      Melos::Struct::EncryptedGroupSecrets.create(
+        new_member: joiner.key_package.ref(@suite),
+        encrypted_group_secrets: Melos::Struct::HPKECipherText.create(kem_output: kem_output, ciphertext: ciphertext)
+      )
+    end
+    welcome = Melos::Struct::Welcome.create(cipher_suite: @suite.suite_id, secrets: secrets, encrypted_group_info: encrypted_group_info)
+    Melos::Struct::MLSMessage.create(welcome: welcome)
   end
 
   private
+
+  # 12.4.2: the next epoch's state from a Commit.
+  #   own_path: when we are the committer, { private_tree:, commit_secret:, path_secrets: } from create_update_path;
+  #             the confirmation tag is then computed rather than verified
+  def stage(authenticated_content, own_path:)
+    content = authenticated_content.content
+    raise ArgumentError.new('not a commit') unless content.content_type == Melos::Constants::ContentType::COMMIT
+    raise ArgumentError.new("commit is for epoch #{content.epoch}, current epoch is #{@epoch}") unless content.epoch == @epoch
+    # TODO: external and new-member commits
+    raise ArgumentError.new('only commits from members are supported') unless content.sender.sender_type == Melos::Constants::SenderType::MEMBER
+    committer = content.sender.leaf_index
+    raise ArgumentError.new('our own commit must be staged through create_commit') if committer == @leaf_index && own_path.nil?
+    commit = content.commit
+
+    proposals = resolve_proposals(commit.proposals, committer)
+    # 12.4: the path is required if the proposal list is empty or contains any of these
+    path_required = proposals.empty? || proposals.any? do |proposal, _sender|
+      [Melos::Constants::ProposalType::UPDATE, Melos::Constants::ProposalType::REMOVE,
+       Melos::Constants::ProposalType::EXTERNAL_INIT, Melos::Constants::ProposalType::GROUP_CONTEXT_EXTENSIONS].include?(proposal.proposal_type)
+    end
+    raise ArgumentError.new('commit must have a path') if commit.path.nil? && path_required
+
+    tree = @ratchet_tree.dup
+    private_tree = own_path ? own_path[:private_tree] : @private_tree.dup
+    extensions, joiners, psk_ids = apply_proposals(tree, proposals)
+
+    if commit.path.nil?
+      commit_secret = Melos::Crypto::Util.zero_vector(@suite.kdf.n_h)
+    else
+      tree.merge_update_path(committer, commit.path)
+      if own_path
+        commit_secret = own_path[:commit_secret]
+      else
+        # the UpdatePath is encrypted with the provisional GroupContext: new epoch and tree, old transcript hash
+        provisional_group_context = Melos::Struct::GroupContext.create(
+          cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
+          tree_hash: tree.root_tree_hash, confirmed_transcript_hash: @confirmed_transcript_hash, extensions: extensions
+        )
+        path_secret = tree.decrypt_path_secret(private_tree, commit.path, committer, @leaf_index, provisional_group_context, joiners.map(&:leaf_index))
+        commit_secret = tree.calculate_commit_secret(commit.path, committer, @leaf_index, path_secret)
+      end
+    end
+
+    # 8.2: transcript hashes
+    confirmed_transcript_hash = Melos::Crypto.hash(@suite, @interim_transcript_hash + authenticated_content.confirmed_transcript_hash_input.raw)
+    new_group_context = Melos::Struct::GroupContext.create(
+      cipher_suite: @suite.suite_id, group_id: @group_id, epoch: @epoch + 1,
+      tree_hash: tree.root_tree_hash, confirmed_transcript_hash: confirmed_transcript_hash, extensions: extensions
+    )
+
+    # 8: the next epoch's key schedule, and the confirmation tag that goes with it
+    epoch_secrets = @epoch_secrets.next(commit_secret, psk_secret_for(psk_ids), new_group_context, n_leaves: tree.n_leaves)
+    confirmation_tag = Melos::Crypto.mac(@suite, epoch_secrets.confirmation_key, confirmed_transcript_hash)
+    if own_path.nil? && authenticated_content.auth.confirmation_tag != confirmation_tag
+      raise ArgumentError.new('confirmation tag does not verify')
+    end
+
+    StagedCommit.new(
+      ratchet_tree: tree, private_tree: private_tree, extensions: extensions,
+      confirmed_transcript_hash: confirmed_transcript_hash,
+      interim_transcript_hash: self.class.interim_transcript_hash(@suite, confirmed_transcript_hash, confirmation_tag),
+      epoch_secrets: epoch_secrets, group_context: new_group_context, confirmation_tag: confirmation_tag,
+      joiners: joiners, path_secrets: own_path && own_path[:path_secrets], psk_ids: psk_ids
+    )
+  end
 
   # 6.1: the key that signed a message from this sender
   def sender_signature_key(sender)
@@ -322,8 +410,8 @@ class Melos::Group
   end
 
   # 12.4: the proposals a Commit covers, by value or by reference, as [proposal, sender leaf index] pairs
-  def resolve_proposals(commit, committer)
-    commit.proposals.map do |proposal_or_ref|
+  def resolve_proposals(proposal_or_refs, committer)
+    proposal_or_refs.map do |proposal_or_ref|
       if proposal_or_ref.proposal
         [proposal_or_ref.proposal, committer]
       else
@@ -337,7 +425,7 @@ class Melos::Group
   end
 
   # 12.3: apply proposals to tree, in the order GroupContextExtensions, Update, Remove, Add, PreSharedKey.
-  # Returns [extensions, joiners (leaf indexes of added members), psk_ids]
+  # Returns [extensions, joiners (Joiner for each added member), psk_ids]
   def apply_proposals(tree, proposals)
     of_type = ->(type) { proposals.select { |proposal, _sender| proposal.proposal_type == type } }
     unsupported = proposals.map { |proposal, _| proposal.proposal_type } & [Melos::Constants::ProposalType::REINIT, Melos::Constants::ProposalType::EXTERNAL_INIT]
@@ -355,7 +443,7 @@ class Melos::Group
       tree.remove_leaf_node(proposal.remove.removed) # TODO: if this is our leaf, we have been removed
     end
     joiners = of_type.(Melos::Constants::ProposalType::ADD).map do |proposal, _sender|
-      tree.add_leaf_node(proposal.add.key_package.leaf_node)
+      Joiner.new(tree.add_leaf_node(proposal.add.key_package.leaf_node), proposal.add.key_package)
     end
     psk_ids = of_type.(Melos::Constants::ProposalType::PSK).map { |proposal, _sender| proposal.psk.psk }
     [extensions, joiners, psk_ids]
@@ -377,29 +465,28 @@ class Melos::Group
     Melos::PSK.psk_secret(@suite, psks)
   end
 
-  def framed_content(content_type, content)
-    Melos::Struct::FramedContent.create(
-      group_id: @group_id,
-      epoch: @epoch,
-      sender: Melos::Struct::Sender.create_member(@leaf_index),
-      authenticated_data: "authenticated_data", # 6.3.1: it is up to the application to decide what authenticated_data to provide and how much padding to add to a given message (if any)
-      content_type: content_type,
-      content: content
+  # 6: FramedContent -> AuthenticatedContent, signed with our key in the current GroupContext
+  def frame_and_sign(content_type, content, wire_format:, authenticated_data:)
+    framed_content = Melos::Struct::FramedContent.create(
+      group_id: @group_id, epoch: @epoch, sender: Melos::Struct::Sender.create_member(@leaf_index),
+      authenticated_data: authenticated_data, content_type: content_type, content: content
     )
+    authenticated_content = Melos::Struct::AuthenticatedContent.create(wire_format: wire_format, content: framed_content, auth: nil)
+    authenticated_content.sign(@suite, @signature_private_key, group_context)
+    authenticated_content
   end
 
-  def create_protected_public_message(framed_content)
-    authenticated_content = Melos::Struct::AuthenticatedContent.create(
-      wire_format: Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE,
-      content: framed_content,
-      auth: nil
-    )
-    authenticated_content.sign(@suite, @signature_private_key, group_context)
-    if framed_content.content_type == Melos::Constants::ContentType::COMMIT
-      # TODO: a real confirmation tag needs the next epoch's confirmation key; see stage_commit
-      confirmation_tag = Melos::Crypto.derive_secret(@suite, Melos::Crypto::Util.zero_vector(@suite.kdf.n_h), "confirmation_tag")
-      authenticated_content.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+  # 6.2, 6.3: AuthenticatedContent -> PublicMessage or PrivateMessage, wrapped in an MLSMessage
+  def protect_authenticated_content(authenticated_content, padding_size:)
+    case authenticated_content.wire_format
+    when Melos::Constants::WireFormat::MLS_PUBLIC_MESSAGE
+      message = Melos::Struct::PublicMessage.protect(authenticated_content, @suite, @epoch_secrets.membership_key, group_context)
+      Melos::Struct::MLSMessage.create(public_message: message)
+    when Melos::Constants::WireFormat::MLS_PRIVATE_MESSAGE
+      message = Melos::Struct::PrivateMessage.protect(authenticated_content, @suite, @epoch_secrets.secret_tree, @epoch_secrets.sender_data_secret, padding_size)
+      Melos::Struct::MLSMessage.create(private_message: message)
+    else
+      raise ArgumentError.new('wire format must be PublicMessage or PrivateMessage')
     end
-    Melos::Struct::PublicMessage.protect(authenticated_content, @suite, @epoch_secrets.membership_key, group_context)
   end
 end

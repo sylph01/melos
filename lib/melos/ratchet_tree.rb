@@ -263,14 +263,17 @@ class Melos::RatchetTree
     @nodes[node_index] = Melos::Struct::Node.new_leaf_node(update_path.leaf_node)
   end
 
-  # 7.5 (sender side): build an UpdatePath from a fresh leaf secret. Does not modify this tree; the caller
-  # merges the returned path with #merge_update_path once the commit is in place. The sender's new leaf
-  # private key and the private keys of its filtered direct path are written into private_tree.
-  #   except: node indexes to leave out of the copath resolutions (leaves being added by the same commit)
-  # Returns { update_path:, commit_secret: }.
-  def create_update_path(private_tree, sender_leaf_index, signature_private_key, group_id, group_context, except = [])
-    tree = dup
-    sender_node_index = sender_leaf_index * 2
+      # 7.5 (sender side): build an UpdatePath from a fresh leaf secret. Does not modify this tree; the caller
+      # merges the returned path with #merge_update_path once the commit is in place. The sender's new leaf
+      # private key and the private keys of its filtered direct path are written into private_tree.
+      #   group_context: the provisional GroupContext of the new epoch (12.4.2). Its tree_hash is ignored and
+      #                  replaced with the hash of the tree after this path is merged, which the path secrets are encrypted with.
+      #   except: node indexes to leave out of the copath resolutions (leaves being added by the same commit)
+      # Returns { update_path:, commit_secret:, path_secrets: } with path_secrets by node index of the filtered direct path.
+      def create_update_path(private_tree, sender_leaf_index, signature_private_key, group_context, except = [])
+        tree = dup
+        group_id = group_context.group_id
+      sender_node_index = sender_leaf_index * 2
     original_leaf_node = tree.leaf_node_at(sender_leaf_index)
     fdp = tree.filtered_direct_path(sender_node_index)
 
@@ -303,14 +306,19 @@ class Melos::RatchetTree
     )
     new_leaf_node.sign(@suite, signature_private_key, group_id, sender_leaf_index)
 
-    # merge into the copy so the copath resolutions below are those of the tree the receivers will see
+    # merge into the copy so the copath resolutions below are those of the tree the receivers will see,
+    # and so that the provisional GroupContext carries the new tree hash
     tree.merge_update_path(sender_leaf_index, Melos::Struct::UpdatePath.create(leaf_node: new_leaf_node, nodes: bare_nodes))
+    provisional_group_context = Melos::Struct::GroupContext.create(
+      cipher_suite: group_context.cipher_suite, group_id: group_context.group_id, epoch: group_context.epoch,
+      tree_hash: tree.root_tree_hash, confirmed_transcript_hash: group_context.confirmed_transcript_hash, extensions: group_context.extensions
+    )
 
     copath_nodes = tree.copath_nodes_of_filtered_direct_path(sender_node_index)
     nodes = fdp.each_index.map do |i|
       ciphertexts = (tree.resolution(copath_nodes[i]) - except).map do |resolution_node_index|
         kem_output, ciphertext = Melos::Crypto.encrypt_with_label(
-          @suite, tree[resolution_node_index].public_encryption_key, "UpdatePathNode", group_context.raw, path_secrets[i]
+          @suite, tree[resolution_node_index].public_encryption_key, "UpdatePathNode", provisional_group_context.raw, path_secrets[i]
         )
         Melos::Struct::HPKECipherText.create(kem_output: kem_output, ciphertext: ciphertext)
       end
@@ -322,7 +330,8 @@ class Melos::RatchetTree
 
     {
       update_path: Melos::Struct::UpdatePath.create(leaf_node: new_leaf_node, nodes: nodes),
-      commit_secret: commit_secret
+      commit_secret: commit_secret,
+      path_secrets: fdp.zip(path_secrets).to_h
     }
   end
 

@@ -43,6 +43,14 @@ class Melos::Crypto
     end
 
     module X448
+      def self.serialize_public_key(key)
+        key.raw_public_key
+      end
+
+      def self.serialize_private_key(key)
+        key.raw_private_key
+      end
+
       def self.deserialize_public_encapsulation_key(raw)
         OpenSSL::PKey.new_raw_public_key('X448', raw)
       end

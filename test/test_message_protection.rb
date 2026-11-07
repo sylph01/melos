@@ -136,12 +136,9 @@ message_protection_vectors.each do |mpv|
     content: framed_content,
     auth: nil
   )
-  authenticated_content_2.sign(suite, signature_priv, group_context)
-
-  ### NOTE: BouncyCastle just derives a key from a zero vector and uses it to construct a confirmation tag. Is that legal...? But we don't have a active key schedule so that might be the way to go
+  ### NOTE: there is no key schedule here to derive a real confirmation tag from (BouncyCastle derives one from a zero vector), so any MAC-sized value will do
   confirmation_tag = Melos::Crypto.derive_secret(suite, Melos::Crypto::Util.zero_vector(suite.kdf.n_h), "confirmation_tag")
-  ### and here we directly set it inside authenticated content...
-  authenticated_content_2.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+  authenticated_content_2.sign(suite, signature_priv, group_context, confirmation_tag: confirmation_tag)
 
   public_message_2 = Melos::Struct::PublicMessage.protect(authenticated_content_2, suite, epoch_secrets.membership_key, group_context)
   authenticated_content_3 = public_message_2.unprotect(suite, epoch_secrets.membership_key, group_context)
@@ -169,9 +166,7 @@ message_protection_vectors.each do |mpv|
     content: framed_content,
     auth: nil
   )
-  authenticated_content_4.sign(suite, signature_priv, group_context)
-  ### and here we directly set it inside authenticated content...
-  authenticated_content_4.auth.instance_variable_set(:@confirmation_tag, confirmation_tag)
+  authenticated_content_4.sign(suite, signature_priv, group_context, confirmation_tag: confirmation_tag)
   private_message_4 = Melos::Struct::PrivateMessage.protect(authenticated_content_4, suite, epoch_secrets.secret_tree, epoch_secrets.sender_data_secret, 7) # padding size is arbitrary
 
   epoch_secrets = new_epoch.() # the other side's copy of the epoch

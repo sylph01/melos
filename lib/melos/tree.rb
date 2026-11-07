@@ -108,7 +108,7 @@ class Melos::Tree
         raise ArgumentError.new('Failed to find common ancestor')
       end
 
-      dxy.min { level(_1) }
+      dxy.min_by { level(_1) }
     end
 
     def overlap_with_filtered_direct_path(x, filtered_direct_path, n)
@@ -119,7 +119,7 @@ class Melos::Tree
         raise ArgumentError.new('Failed to find overlap')
       end
 
-      dxf.min { level(_1) }
+      dxf.min_by { level(_1) }
     end
 
     def leaf?(node_index)
