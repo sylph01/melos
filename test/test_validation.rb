@@ -237,6 +237,18 @@ blank_unmerged.nodes[root] = Melos::Struct::Node.new_parent_node(Melos::Struct::
 assert_raises(ArgumentError) { check_tree.(blank_unmerged) }
 puts "[pass] a tree whose parent lists a blank leaf as unmerged is rejected"
 
+## 12.4.3 a client never participates in two groups with the same group_id
+dave = Melos::Client.new(suite_id, identity: 'dave')
+dave.create_group("shared-id")
+assert_raises(ArgumentError) { dave.create_group("shared-id") }
+erin = Melos::Client.new(suite_id, identity: 'erin')
+erin_group = erin.create_group("shared-id") # a different client, fine
+erin_group.create_add_proposal(wire(dave.create_key_package.message))
+result = erin_group.create_commit
+assert_raises(ArgumentError) { dave.join_group(wire(result.welcome)) }
+assert_equal ["shared-id"], dave.groups.keys
+puts "[pass] a client refuses to create or join a second group with a group_id it is already using"
+
 ## 12.4.2 a member removed by a commit cannot follow the group further
 result = alice_group.create_commit(inline_proposals: [Melos::Struct::Proposal.create(proposal_type: C::ProposalType::REMOVE, remove: Melos::Struct::Remove.create(removed: 1))])
 bob_group.process_message(wire(result.commit))

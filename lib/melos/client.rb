@@ -7,7 +7,7 @@ require_relative 'struct/structs'
 # credential, plus what a client keeps across groups: the external PSKs it knows (8.4) and the
 # KeyPackages it has published and may still be welcomed into a group with (10).
 class Melos::Client
-  attr_reader :cipher_suite, :credential, :external_psks, :key_packages
+  attr_reader :cipher_suite, :credential, :external_psks, :key_packages, :groups
 
   def initialize(cipher_suite_id, identity: '')
     @cipher_suite = Melos::Crypto::CipherSuite.new(cipher_suite_id)
@@ -15,6 +15,7 @@ class Melos::Client
     @credential = Melos::Struct::Credential.create_basic_credential(identity)
     @external_psks = {} # psk_id -> psk; shared by reference with the groups this client is in
     @key_packages = {}  # KeyPackageRef -> Melos::KeyPackageBundle, until used to join a group
+    @groups = {}        # group_id -> Melos::Group this client created or joined
   end
 
   def signature_private_key
@@ -46,7 +47,8 @@ class Melos::Client
     bundle = Melos::KeyPackageBundle.generate(
       @cipher_suite, signature_private_key: signature_private_key, signature_public_key: signature_public_key, credential: @credential
     )
-    Melos::Group.create(
+    ensure_group_id_free!(group_id)
+    @groups[group_id] = Melos::Group.create(
       @cipher_suite, group_id, bundle.key_package.leaf_node,
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
       extensions: extensions, external_psks: @external_psks, **options
@@ -66,7 +68,18 @@ class Melos::Client
       encryption_private_key: bundle.encryption_private_key, signature_private_key: signature_private_key,
       external_psks: @external_psks, ratchet_tree: ratchet_tree, **options
     )
+    ensure_group_id_free!(group.group_id)
     @key_packages.delete(bundle.ref)
-    group
+    @groups[group.group_id] = group
+  end
+
+  private
+
+  # 12.4.3: a group_id MUST be unique among the groups this client is participating in;
+  # a group this client has been removed from no longer counts
+  def ensure_group_id_free!(group_id)
+    existing = @groups[group_id]
+    return if existing.nil? || !existing.active?
+    raise ArgumentError.new('this client is already in a group with this group_id')
   end
 end

@@ -116,6 +116,8 @@ class Melos::Group
     raise ArgumentError.new('not a Welcome message') if welcome.nil?
     raise ArgumentError.new('Welcome is for a different cipher suite') unless welcome.cipher_suite == suite.suite_id
     key_package = key_package.key_package if key_package.is_a?(Melos::Struct::MLSMessage)
+    # 12.4.3.1: the KeyPackage and the Welcome must be for the same cipher suite
+    raise ArgumentError.new('KeyPackage and Welcome are for different cipher suites') unless key_package.cipher_suite == welcome.cipher_suite
 
     # Identify the entry in welcome.secrets corresponding to our KeyPackage and decrypt it with init_priv
     key_package_ref = key_package.ref(suite)
