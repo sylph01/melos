@@ -29,9 +29,8 @@ As of version 0.1.0, this implements:
 - All test vectors in [mls-implementations/test-vectors.md](https://github.com/mlswg/mls-implementations/blob/main/test-vectors.md),
   plus round-trip tests in which several members create, join, message and leave a group
 
-It does not yet implement:
-
-- Interop testing against other implementations
+Interop with OpenMLS and MLS++ is tested through the mls-implementations harness; see
+[interop/README.md](interop/README.md) for how to run it and the results.
 
 ## Usage
 

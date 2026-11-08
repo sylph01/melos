@@ -267,7 +267,7 @@ blank leaf (after a resync's Remove, which `#validate_resync!` limits to an earl
 `member_matcher:`), the external init secret, and `validate_update_path!(new_leaf: true)`. Tests in
 `test/test_external_commits.rb`.
 
-## 12. Interop testing (L)
+## 12. Interop testing (L) — done
 
 **RFC.** None; the mls-implementations repository defines a gRPC interop harness
 (`mls_client.proto`) that drives each implementation through a test runner.
@@ -287,7 +287,16 @@ the runner's scripts.
 
 **Test.** The runner's own scripts; keep a record of which pass in this file.
 
+**Done as.** `interop/melos_interop.rb` (the `MLSClient` service over `Client` and `Group`, all 34 RPCs)
+and `bin/melos-interop`, with `grpc` / `grpc-tools` in the Gemfile's `interop` group and the generated
+code in `interop/proto/`. `interop/build-test-runner.sh` builds the Go runner from a local
+mls-implementations checkout with `interop/test-runner.patch` (two upstream bugs in assigning clients
+to actors); `interop/run.rb` and `interop/summarize.rb` run and report. The record of what passes is
+in [interop/README.md](../interop/README.md): every config but `deep_random` passes against melos
+itself and against OpenMLS (5316/5316 mixed runs); against MLS++ the only failures are its KeyPackages
+with unlisted GREASE extensions, which melos rejects. `test/test_interop_service.rb` covers the service
+in `rake test`. Also from this: `CipherSuite.new` raises `UnsupportedError` for an unknown suite.
+
 ## Suggested sequence
 
-~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9~~ → 12, with interop (12) ready to start,
-since it is the strongest check on everything else and takes calendar time rather than code.
+~~2 → 1 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 11 → 9 → 12~~: all done.

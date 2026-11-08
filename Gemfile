@@ -9,3 +9,9 @@ gem "irb"
 gem "rake", "~> 13.0"
 
 gem "rspec", "~> 3.0"
+
+# The interop harness (interop/, bin/melos-interop): a gRPC server for the mls-implementations test runner
+group :interop do
+  gem "grpc", "~> 1.85"
+  gem "grpc-tools", "~> 1.85"
+end

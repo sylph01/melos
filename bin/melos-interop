@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+# The melos client for the mls-implementations interop test runner: a gRPC server on the given port.
+#   bundle exec bin/melos-interop -p 50054
+# See interop/README.md.
+require 'optparse'
+$LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
+require_relative '../interop/melos_interop'
+
+port = 50054
+OptionParser.new do |opts|
+  opts.banner = 'Usage: melos-interop [-p PORT]'
+  opts.on('-p', '--port PORT', Integer, "port to listen on (default #{port})") { port = _1 }
+end.parse!
+
+Melos::Interop.serve(port)

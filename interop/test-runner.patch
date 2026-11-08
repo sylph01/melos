@@ -1,0 +1,24 @@
+--- a/interop/test-runner/main.go	2026-11-08 13:30:32.915947827 +0900
++++ b/interop/test-runner/main.go	2026-11-08 13:30:32.926801241 +0900
+@@ -446,7 +446,10 @@
+ 	out := make([][]int, 0, vals*len(base))
+ 	for _, tuple := range base {
+ 		for v := range ix {
+-			out = append(out, append(tuple, v))
++			// Copy tuple before appending: append(tuple, v) reuses its backing array once it has spare
++			// capacity, which corrupts and duplicates assignments of clients to actors (fix from OpenMLS).
++			t := append([]int(nil), tuple...)
++			out = append(out, append(t, v))
+ 		}
+ 	}
+ 
+@@ -1776,7 +1779,8 @@
+ 				}
+ 
+ 				for i := range actors {
+-					config.ActorClients[actors[i]] = p.clients[combo[i]]
++					// combo indexes clients (those supporting this suite), not p.clients
++					config.ActorClients[actors[i]] = p.clients[clients[combo[i]]]
+ 				}
+ 
+ 				configs = append(configs, config)
