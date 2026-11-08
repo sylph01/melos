@@ -82,3 +82,13 @@ bundle exec rake test
 
 runs a subset of the test vectors; `TEST_ALL=1 bundle exec rake test` runs all of them, for every cipher suite.
 The vectors are the ones from [mls-implementations](https://github.com/mlswg/mls-implementations), in `test_vectors/`.
+
+## Related resources
+
+- Talks
+  - [RubyKaigi 2025](https://youtu.be/JWQsJxdvMQg) (EN; at version 0.0.1)
+    - [Slides(EN)](https://speakerdeck.com/sylph01/end-to-end-encryption-saves-lives-you-can-start-saving-lives-with-ruby-too)
+  - [RubyConf Taiwan 2025](https://youtu.be/3RwPybQOSEg) (EN; at version 0.1.0)
+    - [Slides(EN)](https://speakerdeck.com/sylph01/end-to-end-encryption-saves-lives-you-can-start-saving-lives-with-ruby-too-rubyconf-taiwan-2025-ver-dot)
+  - BuriKaigi 2026 (JA; at version 0.1.0)
+    - [Slides(JA)](https://speakerdeck.com/sylph01/ren-ming-wojiu-uji-shu-tositenoend-to-endan-hao-hua-tomessaging-layer-security)
