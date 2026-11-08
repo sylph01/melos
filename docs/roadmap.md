@@ -272,7 +272,10 @@ blank leaf (after a resync's Remove, which `#validate_resync!` limits to an earl
 **RFC.** None; the mls-implementations repository defines a gRPC interop harness
 (`mls_client.proto`) that drives each implementation through a test runner.
 
-**Have.** All test vectors pass, and the round-trip tests only pit melos against itself.
+**Have.** All test vectors pass, and the round-trip tests only pit melos against itself. The passive
+vectors recorded from interop runs (`interop/passive`, in `test_vectors/interop-passive/`) pass too,
+except 56 whose KeyPackages carry unlisted GREASE extensions, which melos rejects per RFC 10
+(`test/test_passive_client_interop.rb`).
 
 **Build.** A `melos-interop` executable implementing the gRPC `MLSClient` service with `grpc` and
 `google-protobuf` gems (development dependencies only): state handles for groups, the

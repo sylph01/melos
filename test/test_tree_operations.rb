@@ -26,6 +26,8 @@ vectors.each do |vec|
     tree.add_leaf_node(prop.add.key_package.leaf_node)
     puts "[pass] Application of Add"
   elsif prop.update
+    # 12.1.2: an Update carries a leaf with source update (fixed in mls-implementations 89134d5)
+    assert_equal Melos::Constants::LeafNodeSource::UPDATE, prop.update.leaf_node.leaf_node_source
     tree.update_leaf_node(vec['proposal_sender'], prop.update.leaf_node)
     puts "[pass] Application of Update"
   elsif prop.remove
