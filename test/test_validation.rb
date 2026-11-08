@@ -39,6 +39,11 @@ assert_raises(Melos::ProtocolError) { Melos::Vec.parse_stream(StringIO.new("")) 
 assert_raises(Melos::ProtocolError) { Melos::Vec.parse_stream(StringIO.new("\xC0\x00\x00\x00")) } # prefix 3
 puts "[pass] non-minimal, truncated and invalid vector headers are rejected"
 
+## 5.1 an unknown cipher suite is refused up front
+assert_raises(Melos::UnsupportedError) { Melos::Crypto::CipherSuite.new(9) }
+assert_raises(Melos::UnsupportedError) { Melos::Client.new(9) }
+puts "[pass] an unsupported cipher suite is refused"
+
 ## 7.2 default capabilities list no default types
 assert_empty Melos::Capabilities.new.proposals
 assert_empty Melos::Capabilities.new.extensions

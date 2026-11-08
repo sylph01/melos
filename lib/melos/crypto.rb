@@ -202,6 +202,8 @@ class Melos::Crypto
         @hpke = HPKE.new(HPKE::DHKEM_P384_HKDF_SHA384, HPKE::HKDF_SHA384, HPKE::AES_256_GCM)
         @kdf = @hpke.hkdf
         @pkey = Melos::Crypto::CipherSuite::P384
+      else
+        raise Melos::UnsupportedError.new("unsupported cipher suite #{suite_id}")
       end
     end
   end

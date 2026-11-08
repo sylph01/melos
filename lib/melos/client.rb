@@ -216,6 +216,9 @@ class Melos::Client
     @groups[group.group_id] = group
   end
 
+  # the options of #reinit_group and #branch_group that go to the new group's first commit rather than to the group
+  RESUMPTION_COMMIT_OPTIONS = %i[wire_format include_ratchet_tree path].freeze
+
   # 11.2, 11.3: a new group of this client resuming old_group: created in epoch 0, then a first commit adding
   # key_packages with the resumption PSK of old_group's current epoch, merged at once
   def resume(old_group, key_packages, usage, group_id, extensions, options)
@@ -223,8 +226,8 @@ class Melos::Client
       usage: usage, psk_group_id: old_group.group_id, psk_epoch: old_group.epoch, psk_nonce: SecureRandom.random_bytes(@cipher_suite.kdf.n_h)
     )
     psk = old_group.resumption_psks.fetch(old_group.epoch)
-    commit_options = options.slice(:wire_format, :include_ratchet_tree)
-    group = create_group(group_id, extensions: extensions, **options.except(:wire_format, :include_ratchet_tree))
+    commit_options = options.slice(*RESUMPTION_COMMIT_OPTIONS)
+    group = create_group(group_id, extensions: extensions, **options.except(*RESUMPTION_COMMIT_OPTIONS))
     result = group.send(:create_resumption_commit, key_packages, psk_id, psk, **commit_options)
     group.merge_commit(result.staged)
     [group, result.welcome]
