@@ -9,7 +9,7 @@ a [Messaging Layer Security Protocol](https://www.rfc-editor.org/rfc/rfc9420.htm
 
 ## Implementation status
 
-As of version 0.1.0, this implements:
+As of version 0.9.0, this implements:
 
 - Serialization and deserialization of the RFC 9420 structures
 - Key schedule, secret tree, pre-shared keys, transcript hashes
